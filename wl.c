@@ -5,10 +5,11 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <wayland-client-protocol.h>
 #include <wayland-client.h>
 
 #include "log.h"
-#include "shm.h"
+#include "pool-buffer.h"
 #include "wl.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
@@ -25,14 +26,14 @@ static const struct wl_buffer_listener wl_buffer_listener = {
 static void layer_surface_configure(void *data,
                                     struct zwlr_layer_surface_v1 *surface,
                                     uint32_t serial, uint32_t w, uint32_t h) {
-    zwlr_layer_surface_v1_ack_configure(surface, serial);
-    struct wl_ctx *ctx = data;
-    ctx->width = w * ctx->scale;
-    ctx->height = h * ctx->scale;
-    // TODO: resize shm_pool maybe?
-    // the bar should probobly never resize but ehh
+    struct wb_output *output = data;
+    output->width = w;
+    output->height = h;
 
+    // TODO: resize the buffer maybe?
     // printf("%dx%d\n", ctx->width, ctx->height);
+
+    zwlr_layer_surface_v1_ack_configure(surface, serial);
 }
 
 static void layer_surface_closed(void *data,
@@ -61,11 +62,12 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
 static void output_scale(void *data, struct wl_output *wl_output,
                          int32_t scale) {
-    struct wl_ctx *ctx = data;
-    ctx->scale = scale;
+    struct wb_output *output = data;
+    output->scale = scale;
+    // rerender since the scale changed
 }
 
-static const struct wl_output_listener wl_output_listener = {
+static const struct wl_output_listener output_listener = {
     .geometry = output_geometry,
     .mode = output_mode,
     .done = output_done,
@@ -86,9 +88,12 @@ static void registry_global(void *data, struct wl_registry *wl_registry,
             wl_registry_bind(wl_registry, name, &wl_compositor_interface, 4);
     } else if (strcmp(interface, "wl_output") == 0) {
         log_info("found output");
-        ctx->output =
+        ctx->output = calloc(0, sizeof(struct wb_output));
+        ctx->output->output =
             wl_registry_bind(wl_registry, name, &wl_output_interface, 2);
-        wl_output_add_listener(ctx->output, &wl_output_listener, ctx);
+        ctx->output->scale = 1;
+        wl_output_add_listener(ctx->output->output, &output_listener,
+                               ctx->output);
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
         log_info("found layer shell");
         ctx->layer_shell =
@@ -107,7 +112,7 @@ static const struct wl_registry_listener wl_registry_listener = {
 };
 
 struct wl_ctx *wl_ctx_create() {
-    struct wl_ctx *ctx = malloc(sizeof(*ctx));
+    struct wl_ctx *ctx = calloc(1, sizeof(*ctx));
 
     ctx->display = wl_display_connect(NULL);
     assert(ctx->display);
@@ -118,77 +123,62 @@ struct wl_ctx *wl_ctx_create() {
     wl_registry_add_listener(ctx->registry, &wl_registry_listener, ctx);
     wl_display_roundtrip(ctx->display);
 
-    // create wayland objects
-    ctx->surface = wl_compositor_create_surface(ctx->compositor);
-    assert(ctx->surface);
+    assert(ctx->compositor);
+    assert(ctx->layer_shell);
+    assert(ctx->output);
+    assert(ctx->shm);
+
+    // TODO: create multiple wb_output
+    // each monitor needs a bar
+
+    struct wb_output *output = ctx->output;
+
+    // configure each output
+    output->surface = wl_compositor_create_surface(ctx->compositor);
+    assert(output->surface);
     log_info("created surface");
 
-    ctx->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-        ctx->layer_shell, ctx->surface, NULL, ZWLR_LAYER_SHELL_V1_LAYER_TOP,
-        "wb");
-    assert(ctx->layer_surface);
+    output->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+        ctx->layer_shell, output->surface, output->output,
+        ZWLR_LAYER_SHELL_V1_LAYER_TOP, "wb");
+    assert(output->layer_surface);
     log_info("created layer surface");
 
     // TODO: figure out height situation
     // configure the layer surface
-    // we should a a bar struct that contains config like height
+    // we should have a bar struct that contains config like height
     // and then set the layer surface height based off that
-    zwlr_layer_surface_v1_set_size(ctx->layer_surface, 0, 20);
-    zwlr_layer_surface_v1_set_exclusive_zone(ctx->layer_surface, 20);
-    zwlr_layer_surface_v1_set_anchor(ctx->layer_surface,
+    zwlr_layer_surface_v1_set_size(output->layer_surface, 0, 20);
+    zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, 20);
+    zwlr_layer_surface_v1_set_anchor(output->layer_surface,
                                      ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
                                          ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
                                          ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
-    zwlr_layer_surface_v1_set_margin(ctx->layer_surface, 0, 0, 0, 0);
+    zwlr_layer_surface_v1_set_margin(output->layer_surface, 0, 0, 0, 0);
     zwlr_layer_surface_v1_set_keyboard_interactivity(
-        ctx->layer_surface, ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
-    zwlr_layer_surface_v1_add_listener(ctx->layer_surface,
-                                       &layer_surface_listener, ctx);
-
-    wl_surface_commit(ctx->surface);
+        output->layer_surface,
+        ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+    zwlr_layer_surface_v1_add_listener(output->layer_surface,
+                                       &layer_surface_listener, ctx->output);
+    wl_surface_commit(output->surface);
     wl_display_roundtrip(ctx->display);
 
-    // TODO: make this seperate from wl initialization
     // create buffer after getting surface size
-    int stride = ctx->width * 4;
-    size_t size = stride * ctx->height;
-
-    int fd = allocate_shm_file(size);
-    assert(fd != -1);
-
-    ctx->shm_data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    assert(ctx->shm_data != MAP_FAILED);
-
-    struct wl_shm_pool *pool = wl_shm_create_pool(ctx->shm, fd, size);
-    ctx->buffer = wl_shm_pool_create_buffer(pool, 0, ctx->width, ctx->height,
-                                            stride, WL_SHM_FORMAT_ARGB8888);
-    wl_shm_pool_destroy(pool);
-    close(fd);
-
-    ctx->cairo_surface = cairo_image_surface_create_for_data(
-        (unsigned char *)ctx->shm_data, CAIRO_FORMAT_ARGB32, ctx->width,
-        ctx->height, ctx->width * 4);
+    pool_buffer_create(&output->buffer, ctx->shm, output->width * output->scale,
+                       output->height * output->scale);
+    cairo_scale(output->buffer.cairo, output->scale, output->scale);
 
     return ctx;
 }
 
 void wl_ctx_destroy(struct wl_ctx *ctx) {
-    munmap(ctx->shm_data, ctx->width * ctx->height * 4);
-    wl_buffer_destroy(ctx->buffer);
-
-    // TODO: make this seperate from wayland destruction
-    cairo_surface_destroy(ctx->cairo_surface);
 }
 
-void render(struct wl_ctx *ctx, draw_callback_t draw) {
-    cairo_t *cr = cairo_create(ctx->cairo_surface);
+void render(struct wb_output *output, draw_callback_t draw) {
+    draw(output);
 
-    draw(ctx, cr);
-
-    cairo_destroy(cr);
-
-    wl_surface_set_buffer_scale(ctx->surface, ctx->scale);
-    wl_surface_attach(ctx->surface, ctx->buffer, 0, 0);
-    wl_surface_damage(ctx->surface, 0, 0, ctx->width, ctx->height);
-    wl_surface_commit(ctx->surface);
+    wl_surface_set_buffer_scale(output->surface, output->scale);
+    wl_surface_attach(output->surface, output->buffer.buffer, 0, 0);
+    wl_surface_damage(output->surface, 0, 0, output->width, output->height);
+    wl_surface_commit(output->surface);
 }
