@@ -26,11 +26,12 @@ static const struct wl_buffer_listener wl_buffer_listener = {
 static void layer_surface_configure(void *data,
                                     struct zwlr_layer_surface_v1 *surface,
                                     uint32_t serial, uint32_t w, uint32_t h) {
-    zwlr_layer_surface_v1_ack_configure(surface, serial);
-    struct wb_output *output = data;
+    log_info("layer surface configured");
+
+    struct output_ctx *output = data;
     output->width = w;
     output->height = h;
-    printf("ls configured\n");
+    zwlr_layer_surface_v1_ack_configure(surface, serial);
 }
 
 static void layer_surface_closed(void *data,
@@ -59,9 +60,14 @@ static void output_done(void *data, struct wl_output *wl_output) {
 
 static void output_scale(void *data, struct wl_output *wl_output,
                          int32_t scale) {
-    struct wb_output *output = data;
+    log_info("output scale: %d", scale);
+
+    struct output_ctx *output = data;
     output->scale = scale;
-    printf("scale: %d\n", scale);
+
+    if (output->draw_callback) {
+        render(output);
+    }
 }
 
 static const struct wl_output_listener output_listener = {
@@ -85,7 +91,8 @@ static void registry_global(void *data, struct wl_registry *wl_registry,
             wl_registry_bind(wl_registry, name, &wl_compositor_interface, 4);
     } else if (strcmp(interface, "wl_output") == 0) {
         log_info("found output");
-        ctx->output = calloc(0, sizeof(struct wb_output));
+        ctx->output = calloc(0, sizeof(struct output_ctx));
+        ctx->output->ctx = ctx;
         ctx->output->output =
             wl_registry_bind(wl_registry, name, &wl_output_interface, 2);
         ctx->output->scale = 1;
@@ -128,7 +135,7 @@ struct wl_ctx *wl_ctx_create() {
     // TODO: create multiple wb_output
     // each monitor needs a bar
 
-    struct wb_output *output = ctx->output;
+    struct output_ctx *output = ctx->output;
 
     // configure each output
     output->surface = wl_compositor_create_surface(ctx->compositor);
@@ -167,21 +174,26 @@ void wl_ctx_destroy(struct wl_ctx *ctx) {
     free(ctx);
 }
 
-void render(struct wl_ctx *ctx, struct wb_output *output, draw_func draw) {
+void render(struct output_ctx *output) {
     uint32_t width = output->width * output->scale;
     uint32_t height = output->height * output->scale;
+
+    // check if buffer is out of date of output configuration
     if (width != output->buffer.width || height != output->buffer.height) {
         // destroy out of date buffer
         pool_buffer_destroy(&output->buffer);
 
         // create new one
-        pool_buffer_create(&output->buffer, ctx->shm, width, height);
+        pool_buffer_create(&output->buffer, output->ctx->shm, width, height);
 
         output->cairo_surface = cairo_image_surface_create_for_data(
             output->buffer.data, CAIRO_FORMAT_ARGB32,
             output->width * output->scale, output->height * output->scale,
             output->scale * output->width * 4);
     }
+
+    assert(output->buffer.buffer);
+    assert(output->draw_callback);
 
     cairo_t *cr = cairo_create(output->cairo_surface);
     cairo_scale(cr, output->scale, output->scale);
@@ -191,7 +203,9 @@ void render(struct wl_ctx *ctx, struct wb_output *output, draw_func draw) {
                               .pango = pango,
                               .width = output->width,
                               .height = output->height};
-    draw(&rctx);
+
+    // call the callback associated with an output
+    output->draw_callback(&rctx);
 
     cairo_destroy(cr);
     g_object_unref(pango);
