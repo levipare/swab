@@ -26,14 +26,11 @@ static const struct wl_buffer_listener wl_buffer_listener = {
 static void layer_surface_configure(void *data,
                                     struct zwlr_layer_surface_v1 *surface,
                                     uint32_t serial, uint32_t w, uint32_t h) {
+    zwlr_layer_surface_v1_ack_configure(surface, serial);
     struct wb_output *output = data;
     output->width = w;
     output->height = h;
-
-    // TODO: resize the buffer maybe?
-    // printf("%dx%d\n", ctx->width, ctx->height);
-
-    zwlr_layer_surface_v1_ack_configure(surface, serial);
+    printf("ls configured\n");
 }
 
 static void layer_surface_closed(void *data,
@@ -64,7 +61,7 @@ static void output_scale(void *data, struct wl_output *wl_output,
                          int32_t scale) {
     struct wb_output *output = data;
     output->scale = scale;
-    // rerender since the scale changed
+    printf("scale: %d\n", scale);
 }
 
 static const struct wl_output_listener output_listener = {
@@ -163,19 +160,41 @@ struct wl_ctx *wl_ctx_create() {
     wl_surface_commit(output->surface);
     wl_display_roundtrip(ctx->display);
 
-    // create buffer after getting surface size
-    pool_buffer_create(&output->buffer, ctx->shm, output->width * output->scale,
-                       output->height * output->scale);
-    cairo_scale(output->buffer.cairo, output->scale, output->scale);
-
     return ctx;
 }
 
 void wl_ctx_destroy(struct wl_ctx *ctx) {
+    free(ctx);
 }
 
-void render(struct wb_output *output, draw_callback_t draw) {
-    draw(output);
+void render(struct wl_ctx *ctx, struct wb_output *output, draw_func draw) {
+    uint32_t width = output->width * output->scale;
+    uint32_t height = output->height * output->scale;
+    if (width != output->buffer.width || height != output->buffer.height) {
+        // destroy out of date buffer
+        pool_buffer_destroy(&output->buffer);
+
+        // create new one
+        pool_buffer_create(&output->buffer, ctx->shm, width, height);
+
+        output->cairo_surface = cairo_image_surface_create_for_data(
+            output->buffer.data, CAIRO_FORMAT_ARGB32,
+            output->width * output->scale, output->height * output->scale,
+            output->scale * output->width * 4);
+    }
+
+    cairo_t *cr = cairo_create(output->cairo_surface);
+    cairo_scale(cr, output->scale, output->scale);
+    PangoContext *pango = pango_cairo_create_context(cr);
+
+    struct render_ctx rctx = {.cr = cr,
+                              .pango = pango,
+                              .width = output->width,
+                              .height = output->height};
+    draw(&rctx);
+
+    cairo_destroy(cr);
+    g_object_unref(pango);
 
     wl_surface_set_buffer_scale(output->surface, output->scale);
     wl_surface_attach(output->surface, output->buffer.buffer, 0, 0);

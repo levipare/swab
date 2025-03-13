@@ -69,26 +69,11 @@ void pool_buffer_create(struct pool_buffer *pb, struct wl_shm *shm,
                                            WL_SHM_FORMAT_ARGB8888);
     wl_shm_pool_destroy(pool);
     close(fd);
-
-    pb->surface = cairo_image_surface_create_for_data((unsigned char *)pb->data,
-                                                      CAIRO_FORMAT_ARGB32,
-                                                      width, height, width * 4);
-    pb->cairo = cairo_create(pb->surface);
-    pb->pango = pango_cairo_create_context(pb->cairo);
 }
 
 void pool_buffer_destroy(struct pool_buffer *buffer) {
     if (buffer->buffer) {
         wl_buffer_destroy(buffer->buffer);
-    }
-    if (buffer->cairo) {
-        cairo_destroy(buffer->cairo);
-    }
-    if (buffer->surface) {
-        cairo_surface_destroy(buffer->surface);
-    }
-    if (buffer->pango) {
-        g_object_unref(buffer->pango);
     }
     if (buffer->data) {
         munmap(buffer->data, buffer->size);

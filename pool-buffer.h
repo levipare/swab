@@ -8,9 +8,6 @@
 
 struct pool_buffer {
     struct wl_buffer *buffer;
-    cairo_surface_t *surface;
-    cairo_t *cairo;
-    PangoContext *pango;
     uint32_t width, height;
     size_t size;
     void *data;
