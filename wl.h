@@ -14,16 +14,16 @@ struct render_ctx {
     uint32_t width, height;
 };
 
-struct output_ctx {
+struct wl_output_ctx {
     struct wl_ctx *ctx;
 
     struct wl_output *output;
-    uint32_t output_width, output_height;
+    const char *name;
     int32_t scale;
 
-    uint32_t width, height;
     struct wl_surface *surface;
     struct zwlr_layer_surface_v1 *layer_surface;
+    uint32_t width, height; // dimensions of surface
 
     struct pool_buffer buffer;
     // TODO: the cairo_surface should be part of pool buffer
@@ -39,10 +39,12 @@ struct wl_ctx {
     struct wl_compositor *compositor;
     struct zwlr_layer_shell_v1 *layer_shell;
 
-    struct output_ctx *output;
+    struct wl_output_ctx *outputs;
+
+    void (*loop)();
 };
 
-void render(struct output_ctx *output);
+void render(struct wl_output_ctx *output);
 
 struct wl_ctx *wl_ctx_create();
 

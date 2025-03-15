@@ -13,22 +13,13 @@
 #include "wl.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
-/* wl_buffer listener */
-static void wl_buffer_release(void *data, struct wl_buffer *wl_buffer) {
-    wl_buffer_destroy(wl_buffer);
-}
-
-static const struct wl_buffer_listener wl_buffer_listener = {
-    .release = wl_buffer_release,
-};
-
 /* layer surface listener */
 static void layer_surface_configure(void *data,
                                     struct zwlr_layer_surface_v1 *surface,
                                     uint32_t serial, uint32_t w, uint32_t h) {
     log_info("layer surface configured");
 
-    struct output_ctx *output = data;
+    struct wl_output_ctx *output = data;
     output->width = w;
     output->height = h;
     zwlr_layer_surface_v1_ack_configure(surface, serial);
@@ -56,18 +47,31 @@ static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags,
 }
 
 static void output_done(void *data, struct wl_output *wl_output) {
+    struct wl_output_ctx *output = data;
+
+    if (output->draw_callback) {
+        render(output);
+    }
 }
 
 static void output_scale(void *data, struct wl_output *wl_output,
                          int32_t scale) {
     log_info("output scale: %d", scale);
 
-    struct output_ctx *output = data;
+    struct wl_output_ctx *output = data;
     output->scale = scale;
+}
 
-    if (output->draw_callback) {
-        render(output);
-    }
+static void output_name(void *data, struct wl_output *wl_output,
+                        const char *name) {
+    log_info("output name: %s", name);
+
+    struct wl_output_ctx *output = data;
+    output->name = name;
+}
+
+static void output_description(void *data, struct wl_output *wl_output,
+                               const char *desc) {
 }
 
 static const struct wl_output_listener output_listener = {
@@ -75,6 +79,8 @@ static const struct wl_output_listener output_listener = {
     .mode = output_mode,
     .done = output_done,
     .scale = output_scale,
+    .name = output_name,
+    .description = output_description,
 };
 
 /* registry listener */
@@ -91,13 +97,13 @@ static void registry_global(void *data, struct wl_registry *wl_registry,
             wl_registry_bind(wl_registry, name, &wl_compositor_interface, 4);
     } else if (strcmp(interface, "wl_output") == 0) {
         log_info("found output");
-        ctx->output = calloc(0, sizeof(struct output_ctx));
-        ctx->output->ctx = ctx;
-        ctx->output->output =
-            wl_registry_bind(wl_registry, name, &wl_output_interface, 2);
-        ctx->output->scale = 1;
-        wl_output_add_listener(ctx->output->output, &output_listener,
-                               ctx->output);
+        ctx->outputs = calloc(1, sizeof(struct wl_output_ctx));
+        ctx->outputs->ctx = ctx;
+        ctx->outputs->output =
+            wl_registry_bind(wl_registry, name, &wl_output_interface, 4);
+        ctx->outputs->scale = 1;
+        wl_output_add_listener(ctx->outputs->output, &output_listener,
+                               ctx->outputs);
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
         log_info("found layer shell");
         ctx->layer_shell =
@@ -129,13 +135,13 @@ struct wl_ctx *wl_ctx_create() {
 
     assert(ctx->compositor);
     assert(ctx->layer_shell);
-    assert(ctx->output);
+    assert(ctx->outputs);
     assert(ctx->shm);
 
     // TODO: create multiple wb_output
     // each monitor needs a bar
 
-    struct output_ctx *output = ctx->output;
+    struct wl_output_ctx *output = ctx->outputs;
 
     // configure each output
     output->surface = wl_compositor_create_surface(ctx->compositor);
@@ -163,7 +169,7 @@ struct wl_ctx *wl_ctx_create() {
         output->layer_surface,
         ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
     zwlr_layer_surface_v1_add_listener(output->layer_surface,
-                                       &layer_surface_listener, ctx->output);
+                                       &layer_surface_listener, ctx->outputs);
     wl_surface_commit(output->surface);
     wl_display_roundtrip(ctx->display);
 
@@ -174,7 +180,7 @@ void wl_ctx_destroy(struct wl_ctx *ctx) {
     free(ctx);
 }
 
-void render(struct output_ctx *output) {
+void render(struct wl_output_ctx *output) {
     uint32_t width = output->width * output->scale;
     uint32_t height = output->height * output->scale;
 
