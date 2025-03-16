@@ -5,11 +5,13 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
 #include <wayland-client.h>
 
 #include "log.h"
 #include "pool-buffer.h"
+#include "wb.h"
 #include "wl.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
@@ -27,6 +29,7 @@ static void layer_surface_configure(void *data,
 
 static void layer_surface_closed(void *data,
                                  struct zwlr_layer_surface_v1 *surface) {
+    log_info("layer surface closed");
     zwlr_layer_surface_v1_destroy(surface);
 }
 
@@ -40,18 +43,18 @@ static void output_geometry(void *data, struct wl_output *wl_output, int x,
                             int y, int physical_width, int physical_height,
                             int subpixel, const char *make, const char *model,
                             int transform) {
+    log_info("output geometry");
 }
 
 static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags,
                         int width, int height, int refresh) {
+    log_info("output mode");
 }
 
 static void output_done(void *data, struct wl_output *wl_output) {
-    struct wl_output_ctx *output = data;
+    log_info("output done");
 
-    if (output->draw_callback) {
-        render(output);
-    }
+    struct wl_output_ctx *output = data;
 }
 
 static void output_scale(void *data, struct wl_output *wl_output,
@@ -60,6 +63,9 @@ static void output_scale(void *data, struct wl_output *wl_output,
 
     struct wl_output_ctx *output = data;
     output->scale = scale;
+
+    // TODO: refresh bar (aka rerender on change of scale)
+    // wb_refresh(output);
 }
 
 static void output_name(void *data, struct wl_output *wl_output,
@@ -72,6 +78,7 @@ static void output_name(void *data, struct wl_output *wl_output,
 
 static void output_description(void *data, struct wl_output *wl_output,
                                const char *desc) {
+    log_info("output description");
 }
 
 static const struct wl_output_listener output_listener = {
@@ -90,22 +97,31 @@ static void registry_global(void *data, struct wl_registry *wl_registry,
     // printf("%s %d\n", interface, version);
     struct wl_ctx *ctx = data;
     if (strcmp(interface, wl_shm_interface.name) == 0) {
+        log_info("found shm");
+
         ctx->shm = wl_registry_bind(wl_registry, name, &wl_shm_interface, 1);
     } else if (strcmp(interface, wl_compositor_interface.name) == 0) {
         log_info("found compositor");
+
         ctx->compositor =
             wl_registry_bind(wl_registry, name, &wl_compositor_interface, 4);
-    } else if (strcmp(interface, "wl_output") == 0) {
+    } else if (strcmp(interface, wl_output_interface.name) == 0) {
         log_info("found output");
+
+        // TODO: create multiple wb_output
+        // each monitor needs a bar
         ctx->outputs = calloc(1, sizeof(struct wl_output_ctx));
         ctx->outputs->ctx = ctx;
         ctx->outputs->output =
             wl_registry_bind(wl_registry, name, &wl_output_interface, 4);
         ctx->outputs->scale = 1;
+        // attach listener and roundtrip so that monitor info
+        // is gathered before creating layer surface
         wl_output_add_listener(ctx->outputs->output, &output_listener,
                                ctx->outputs);
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
         log_info("found layer shell");
+
         ctx->layer_shell =
             wl_registry_bind(wl_registry, name, &zwlr_layer_shell_v1_interface,
                              version < 4 ? version : 4);
@@ -138,9 +154,6 @@ struct wl_ctx *wl_ctx_create() {
     assert(ctx->outputs);
     assert(ctx->shm);
 
-    // TODO: create multiple wb_output
-    // each monitor needs a bar
-
     struct wl_output_ctx *output = ctx->outputs;
 
     // configure each output
@@ -170,17 +183,22 @@ struct wl_ctx *wl_ctx_create() {
         ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
     zwlr_layer_surface_v1_add_listener(output->layer_surface,
                                        &layer_surface_listener, ctx->outputs);
+
     wl_surface_commit(output->surface);
     wl_display_roundtrip(ctx->display);
+
+    log_info("wayland initialization complete");
 
     return ctx;
 }
 
 void wl_ctx_destroy(struct wl_ctx *ctx) {
+    assert(ctx);
     free(ctx);
 }
 
-void render(struct wl_output_ctx *output) {
+void render(struct wl_output_ctx *output,
+            void (*draw)(void *, struct render_ctx *), void *data) {
     uint32_t width = output->width * output->scale;
     uint32_t height = output->height * output->scale;
 
@@ -198,8 +216,9 @@ void render(struct wl_output_ctx *output) {
             output->scale * output->width * 4);
     }
 
+    assert(output->output);
     assert(output->buffer.buffer);
-    assert(output->draw_callback);
+    assert(draw);
 
     cairo_t *cr = cairo_create(output->cairo_surface);
     cairo_scale(cr, output->scale, output->scale);
@@ -211,7 +230,7 @@ void render(struct wl_output_ctx *output) {
                               .height = output->height};
 
     // call the callback associated with an output
-    output->draw_callback(&rctx);
+    draw(data, &rctx);
 
     cairo_destroy(cr);
     g_object_unref(pango);

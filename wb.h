@@ -2,25 +2,25 @@
 #define WB_H
 
 #include "wl.h"
+#include <pthread.h>
 
 struct wb_module {
-    void *data;
-    void (*run)(struct wb_module *mod);
-    void (*destroy)(struct wb_module *mod);
-};
+    struct wb *bar;
 
-struct wb_container {
-    struct wb_module **mods;
-    size_t count;
+    const char *name;
+    pthread_t thread;
+    void *private;
+    void (*run)(struct wb_module *);
+    char *(*content)(struct wb_module *);
+    void (*destroy)(struct wb_module *);
 };
 
 struct wb {
     struct wl_ctx *wl;
     const char *output_name;
 
-    struct wb_container left;
-    struct wb_container center;
-    struct wb_container right;
+    struct wb_module **modules;
+    size_t module_count;
 };
 
 struct wb *wb_create();
@@ -29,6 +29,8 @@ void wb_destroy(struct wb *bar);
 
 void wb_run(struct wb *bar);
 
-void wb_container_add(struct wb_container *con, struct wb_module *mod);
+void wb_refresh(struct wb *bar);
+
+void wb_add_module(struct wb *bar, struct wb_module *mod);
 
 #endif
