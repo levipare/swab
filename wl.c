@@ -1,5 +1,7 @@
 #include <assert.h>
+#include <cairo/cairo.h>
 #include <fcntl.h>
+#include <pango/pangocairo.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,7 +9,6 @@
 #include <unistd.h>
 #include <wayland-client.h>
 
-#include "cairo.h"
 #include "log.h"
 #include "pool-buffer.h"
 #include "wl.h"
