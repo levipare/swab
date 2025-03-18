@@ -5,13 +5,11 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <wayland-client-core.h>
-#include <wayland-client-protocol.h>
 #include <wayland-client.h>
 
+#include "cairo.h"
 #include "log.h"
 #include "pool-buffer.h"
-#include "wb.h"
 #include "wl.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
@@ -54,7 +52,7 @@ static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags,
 static void output_done(void *data, struct wl_output *wl_output) {
     log_info("output done");
 
-    struct wl_output_ctx *output = data;
+    // struct wl_output_ctx *output = data;
 }
 
 static void output_scale(void *data, struct wl_output *wl_output,
@@ -65,7 +63,6 @@ static void output_scale(void *data, struct wl_output *wl_output,
     output->scale = scale;
 
     // TODO: refresh bar (aka rerender on change of scale)
-    // wb_refresh(output);
 }
 
 static void output_name(void *data, struct wl_output *wl_output,
@@ -193,7 +190,25 @@ struct wl_ctx *wl_ctx_create() {
 }
 
 void wl_ctx_destroy(struct wl_ctx *ctx) {
-    assert(ctx);
+    // output specifics
+    wl_output_release(ctx->outputs->output);
+    wl_surface_destroy(ctx->outputs->surface);
+    zwlr_layer_surface_v1_destroy(ctx->outputs->layer_surface);
+    if (ctx->outputs->buffer.buffer) {
+        wl_buffer_destroy(ctx->outputs->buffer.buffer);
+        cairo_surface_destroy(ctx->outputs->cairo_surface);
+    }
+    free(ctx->outputs);
+
+    // globals
+    zwlr_layer_shell_v1_destroy(ctx->layer_shell);
+    wl_registry_destroy(ctx->registry);
+    wl_shm_destroy(ctx->shm);
+    wl_compositor_destroy(ctx->compositor);
+
+    wl_display_flush(ctx->display);
+    wl_display_disconnect(ctx->display);
+
     free(ctx);
 }
 
