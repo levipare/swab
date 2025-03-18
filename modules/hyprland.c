@@ -32,31 +32,6 @@ static int socket_create(const char *socket_path) {
     return socket_fd;
 }
 
-static int socket_readline(int socket_fd, char *buf, size_t size) {
-    size_t bytes_read = 0;
-    while (1) {
-        char c;
-        ssize_t nread = recv(socket_fd, &c, 1, 0);
-
-        if (nread == -1) {
-            log_fatal("error while calling recv on socket");
-        }
-
-        if (bytes_read < size - 1) {
-            buf[bytes_read] = c;
-        }
-
-        if (c == '\n') {
-            buf[bytes_read] = '\0';
-            break;
-        }
-
-        bytes_read += nread;
-    }
-
-    return bytes_read;
-}
-
 /*
  * expects a null terminator string
  */
@@ -72,7 +47,6 @@ static void run(struct wb_module *mod) {
     struct private *p = mod->private;
 
     char event[1024];
-    size_t nread;
     FILE *fp = fdopen(p->socket2, "r");
     while (fgets(event, sizeof(event), fp)) {
         event[strcspn(event, "\n")] = '\0';

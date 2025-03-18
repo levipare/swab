@@ -90,9 +90,6 @@ static void run(struct wb_module *mod) {
 
         if (dbus_message_is_signal(message, "org.freedesktop.DBus.Properties",
                                    "PropertiesChanged")) {
-            const char *interface_name = dbus_message_get_interface(message);
-            const char *signal_name = dbus_message_get_member(message);
-
             DBusMessageIter arg;
             dbus_message_iter_init(message, &arg);
             dbus_message_iter_next(&arg); // skip interface name
@@ -194,9 +191,9 @@ static char *content(struct wb_module *mod) {
     return batperc;
 }
 
-struct wb_module *battery_create() {
+WB_MODULE_CREATE(battery) {
     struct wb_module *mod = calloc(1, sizeof(*mod));
-    mod->name = "datetime";
+    mod->name = "battery";
     mod->run = run;
     mod->destroy = destroy;
     mod->content = content;

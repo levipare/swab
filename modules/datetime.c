@@ -9,7 +9,7 @@ struct private {
     char status[32];
 };
 
-static void run(struct wb_module *mod) {
+void run(struct wb_module *mod) {
     struct private *p = mod->private;
     while (1) {
         pthread_testcancel();
@@ -30,9 +30,14 @@ static void run(struct wb_module *mod) {
     }
 }
 
-static void destroy(struct wb_module *mod) {
+void destroy(struct wb_module *mod) {
     free(mod->private);
     free(mod);
+}
+
+char *content(struct wb_module *mod) {
+    struct private *p = mod->private;
+    return p->status;
 }
 
 // static void draw(struct wb_module *mod, struct render_ctx *ctx) {
@@ -57,11 +62,6 @@ static void destroy(struct wb_module *mod) {
 
 //     g_object_unref(layout);
 // }
-
-static char *content(struct wb_module *mod) {
-    struct private *p = mod->private;
-    return p->status;
-}
 
 struct wb_module *datetime_create() {
     struct wb_module *mod = calloc(1, sizeof(*mod));
