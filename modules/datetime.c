@@ -2,31 +2,37 @@
 
 #include <assert.h>
 #include <pthread.h>
-#include <sys/time.h>
+#include <time.h>
 #include <unistd.h>
 
 struct private {
     char status[32];
 };
+static void difftimespec(struct timespec *res, struct timespec *a,
+                         struct timespec *b) {
+    res->tv_sec = a->tv_sec - b->tv_sec - (a->tv_nsec < b->tv_nsec);
+    res->tv_nsec = a->tv_nsec - b->tv_nsec + (a->tv_nsec < b->tv_nsec) * 1E9;
+}
 
 void run(struct wb_module *mod) {
     struct private *p = mod->private;
     while (1) {
         pthread_testcancel();
 
-        struct timeval now;
-        gettimeofday(&now, NULL);
+        struct timespec start;
+        clock_gettime(CLOCK_MONOTONIC, &start);
 
+        time_t t = time(NULL);
         strftime(p->status, sizeof(p->status), "%a %b %-d %-I:%M:%S %p",
-                 localtime(&now.tv_sec));
+                 localtime(&t));
 
         wb_refresh(mod->bar);
 
         // sleep until the next second boundary
-        struct timeval next_sec = {.tv_sec = now.tv_sec + 1, .tv_usec = 0};
-        struct timeval sleep_time;
-        timersub(&next_sec, &now, &sleep_time);
-        usleep(sleep_time.tv_usec);
+        struct timespec next_sec = {.tv_sec = start.tv_sec + 1, .tv_nsec = 0};
+        struct timespec sleep_time;
+        difftimespec(&sleep_time, &next_sec, &start);
+        nanosleep(&sleep_time, NULL);
     }
 }
 
