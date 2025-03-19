@@ -1,37 +1,31 @@
 CC = gcc
-CFLAGS = -Wall `pkg-config --cflags wayland-client pangocairo dbus-1`
-LDFLAGS = `pkg-config --libs wayland-client pangocairo dbus-1`
+CFLAGS = -g -Wall $(shell pkg-config --cflags wayland-client pangocairo dbus-1)
+LDFLAGS = $(shell pkg-config --libs wayland-client pangocairo dbus-1)
 
 BIN = a.out
 
 SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)
 
-MODULES = $(wildcard modules/*.c)
-MODULE_OBJS = $(MODULES:%.c=%.so)
-
 PROTOCOLS = $(wildcard protocols/*.xml)
 PROTOCOL_SRCS = $(PROTOCOLS:protocols/%.xml=%-protocol.c)
 PROTOCOL_OBJS = $(PROTOCOLS:protocols/%.xml=%-protocol.o)
 PROTOCOL_HEADERS = $(PROTOCOLS:protocols/%.xml=%-client-protocol.h)
 
-all: $(PROTOCOL_HEADERS) $(PROTOCOL_SRCS) $(PROTOCOL_OBJS) $(BIN)
+all: $(PROTOCOL_HEADERS) $(BIN)
 
-$(BIN): $(OBJS) $(MODULE_OBJS)
-	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJS) $(MODULE_OBJS) -o $(BIN)
-
-%-protocol.c: protocols/%.xml
-	wayland-scanner private-code $< $@
-
-%-client-protocol.h: protocols/%.xml
-	wayland-scanner client-header $< $@
+$(BIN): $(OBJS) $(PROTOCOL_OBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $(BIN)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-modules/%.so: modules/%.c
-	$(CC) $(CFLAGS) $(LDFLAGS) -shared -fPIC $< -o $@
+%-protocol.c: protocols/%.xml
+		wayland-scanner private-code $< $@
+
+%-client-protocol.h: protocols/%.xml
+	wayland-scanner client-header $< $@
 
 
 clean:
-	rm -f $(BIN) $(OBJS) $(MODULE_OBJS) $(PROTOCOL_HEADERS) $(PROTOCOL_SRCS)
+	rm -f $(BIN) $(OBJS) $(PROTOCOL_SRCS) $(PROTOCOL_OBJS) $(PROTOCOL_HEADERS) 
