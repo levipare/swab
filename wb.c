@@ -4,22 +4,18 @@
 
 #include <assert.h>
 #include <pthread.h>
-#include <stdlib.h>
-#include <wayland-client-core.h>
+#include <unistd.h>
 
-static void *module_thread_run(void *data) {
-    struct wb_module *mod = data;
-    log_info("started module (%s)", mod->name);
-    mod->run(mod);
+#define HEX_TO_RGBA(x)                                                         \
+    ((x >> 24) & 0xFF) / 255.0, ((x >> 16) & 0xFF) / 255.0,                    \
+        ((x >> 8) & 0xFF) / 255.0, (x & 0xFF) / 255.0
 
-    return NULL;
-}
+#define BG_COLOR 0x0C0C0CFF
+#define FG_COLOR 0xBBBBBBFF
 
 static void draw_bar(void *data, struct render_ctx *ctx) {
-    struct wb *bar = data;
-
     // Fill background with a color
-    cairo_set_source_rgb(ctx->cr, 0x0C / 255.0, 0x0C / 255.0, 0x0C / 255.0);
+    cairo_set_source_rgba(ctx->cr, HEX_TO_RGBA(BG_COLOR));
     cairo_rectangle(ctx->cr, 0, 0, ctx->width, ctx->height);
     cairo_fill(ctx->cr);
 
@@ -29,53 +25,46 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
     pango_layout_set_font_description(layout, font_desc);
     pango_font_description_free(font_desc);
 
-    cairo_set_source_rgb(ctx->cr, 0xBB / 255.0, 0xBB / 255.0, 0xBB / 255.0);
-    int left = 0;
-    // render all modules
-    for (int i = 0; i < bar->module_count; ++i) {
-        struct wb_module *mod = bar->modules[i];
+    cairo_set_source_rgba(ctx->cr, HEX_TO_RGBA(FG_COLOR));
 
-        char *content = mod->content(mod);
-        pango_layout_set_text(layout, content, -1);
+    // draw text
+    const char *content = data;
+    for (int i = 0; i < 3 && *content; ++i) {
+        size_t len = strcspn(content, "\n");
+        pango_layout_set_text(layout, content, len);
+
         int width, height;
         pango_layout_get_pixel_size(layout, &width, &height);
 
-        cairo_move_to(ctx->cr, left, 0);
-        left += width + 20;
+        double x = 0;
+        if (i == 1) {
+            x = (ctx->width - width) / 2.0;
+        } else if (i == 2) {
+            x = ctx->width - width;
+        }
 
+        cairo_move_to(ctx->cr, x, 0);
         pango_cairo_show_layout(ctx->cr, layout);
+
+        content += len + (content[len] == '\n');
     }
 }
 
-// TODO: consider mutex locks or someother strategy
-// to prevent multiple modules from rendering at the same time
-void wb_refresh(struct wb *bar) {
-    render(bar->wl->outputs, draw_bar, bar);
-    wl_display_flush(bar->wl->display);
-}
+static void *handle_stdin(void *data) {
+    struct wb *bar = data;
 
-void wb_add_module(struct wb *bar, struct wb_module *(create_mod)()) {
-    assert(bar);
-    assert(create_mod);
+    char buf[1024];
+    while (read(STDIN_FILENO, buf, sizeof(buf))) {
+        render(bar->wl->outputs, draw_bar, buf);
+        wl_display_flush(bar->wl->display);
+    }
 
-    struct wb_module *mod = create_mod();
-    assert(mod);
-    assert(mod->run);
-    assert(mod->content);
-    assert(mod->destroy);
-
-    mod->bar = bar;
-
-    bar->modules =
-        realloc(bar->modules, (bar->module_count + 1) * sizeof(*bar->modules));
-    bar->modules[bar->module_count++] = mod;
-
-    log_info("added module (%s)", mod->name);
+    return NULL;
 }
 
 struct wb *wb_create() {
     struct wb *bar = calloc(1, sizeof(*bar));
-    bar->wl = wl_ctx_create();
+    bar->wl = wl_ctx_create(50);
     bar->output_name = bar->wl->outputs->name;
 
     return bar;
@@ -83,17 +72,6 @@ struct wb *wb_create() {
 
 void wb_destroy(struct wb *bar) {
     log_info("wb destroy");
-
-    // destroy each module
-    for (int i = 0; i < bar->module_count; ++i) {
-        struct wb_module *mod = bar->modules[i];
-        if (mod->thread) {
-            pthread_cancel(mod->thread);
-        }
-        mod->destroy(mod);
-    }
-    // free modules array
-    free(bar->modules);
 
     if (bar->wl) {
         wl_ctx_destroy(bar->wl);
@@ -107,11 +85,13 @@ void wb_run(struct wb *bar) {
     assert(bar->wl);
     assert(bar->output_name);
 
-    // start all modules
-    for (int i = 0; i < bar->module_count; ++i) {
-        struct wb_module *mod = bar->modules[i];
-        pthread_create(&mod->thread, NULL, module_thread_run, mod);
-    }
+    // draw blank bar
+    render(bar->wl->outputs, draw_bar, "test\npoop");
+    wl_display_flush(bar->wl->display);
+
+    // create thread to handle stdin
+    pthread_t t;
+    pthread_create(&t, NULL, handle_stdin, bar);
 
     // dispatch wl events
     while (wl_display_dispatch(bar->wl->display)) {
