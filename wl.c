@@ -135,7 +135,7 @@ static const struct wl_registry_listener wl_registry_listener = {
     .global_remove = registry_global_remove,
 };
 
-struct wl_ctx *wl_ctx_create() {
+struct wl_ctx *wl_ctx_create(uint32_t height) {
     struct wl_ctx *ctx = calloc(1, sizeof(*ctx));
 
     ctx->display = wl_display_connect(NULL);
@@ -169,8 +169,8 @@ struct wl_ctx *wl_ctx_create() {
     // configure the layer surface
     // we should have a bar struct that contains config like height
     // and then set the layer surface height based off that
-    zwlr_layer_surface_v1_set_size(output->layer_surface, 0, 20);
-    zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, 20);
+    zwlr_layer_surface_v1_set_size(output->layer_surface, 0, height);
+    zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, height);
     zwlr_layer_surface_v1_set_anchor(output->layer_surface,
                                      ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
                                          ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |

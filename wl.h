@@ -43,7 +43,7 @@ struct wl_ctx {
 void render(struct wl_output_ctx *output,
             void (*draw)(void *, struct render_ctx *), void *data);
 
-struct wl_ctx *wl_ctx_create();
+struct wl_ctx *wl_ctx_create(uint32_t height);
 
 void wl_ctx_destroy(struct wl_ctx *ctx);
 
