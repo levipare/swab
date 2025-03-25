@@ -28,6 +28,8 @@ struct wl_output_ctx {
     struct pool_buffer buffer;
     // TODO: the cairo_surface should be part of pool buffer
     cairo_surface_t *cairo_surface;
+
+    struct wl_list link;
 };
 
 struct wl_ctx {
@@ -37,7 +39,7 @@ struct wl_ctx {
     struct wl_compositor *compositor;
     struct zwlr_layer_shell_v1 *layer_shell;
 
-    struct wl_output_ctx *outputs;
+    struct wl_list outputs;
 };
 
 void render(struct wl_output_ctx *output,

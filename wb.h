@@ -2,16 +2,20 @@
 #define WB_H
 
 #include "wl.h"
+#include <stdbool.h>
+
+struct wb_config {
+    uint32_t height;
+    uint32_t bg_color, fg_color;
+};
 
 struct wb {
     struct wl_ctx *wl;
-    const char *output_name;
+    struct wb_config config;
+    bool exit;
+    char content[1024];
 };
 
-struct wb *wb_create();
-
-void wb_destroy(struct wb *bar);
-
-void wb_run(struct wb *bar);
+void wb_run(struct wb_config config);
 
 #endif
