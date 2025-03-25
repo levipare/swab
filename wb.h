@@ -13,6 +13,8 @@ struct wb {
     struct wl_ctx *wl;
     struct wb_config config;
     bool exit;
+    int exit_pipe[2];
+
     char content[1024];
 };
 

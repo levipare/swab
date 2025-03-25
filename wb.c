@@ -4,9 +4,10 @@
 #include "wl.h"
 
 #include <assert.h>
+#include <poll.h>
 #include <pthread.h>
 #include <unistd.h>
-#include <wayland-client-core.h>
+#include <wayland-client.h>
 
 #define HEX_TO_RGBA(x)                                                         \
     ((x >> 24) & 0xFF) / 255.0, ((x >> 16) & 0xFF) / 255.0,                    \
@@ -64,21 +65,46 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
 static void *handle_stdin(void *data) {
     struct wb *bar = data;
 
-    FILE *stdin_fp = fdopen(STDIN_FILENO, "r");
-    while (fgets(bar->content, sizeof(bar->content), stdin_fp)) {
-        if (bar->exit) {
+    struct pollfd fds[] = {
+        [0] =
+            {
+                .fd = STDIN_FILENO,
+                .events = POLLIN,
+            },
+        [1] =
+            {
+                .fd = bar->exit_pipe[0],
+                .events = POLLIN,
+            },
+    };
+
+    while (true) {
+        int ret = poll(fds, 2, -1);
+
+        if (ret < 0) {
+            log_fatal("poll error");
+        }
+
+        if (fds[1].revents & POLLIN) {
+            log_info("thread exit signal recieved");
             break;
         }
 
-        bar->content[strcspn(bar->content, "\n")] = '\0'; // replace newline
+        if (fds[0].revents & POLLIN) {
+            // check if fgets detects EOF -- if so then the thread exits
+            if (!fgets(bar->content, sizeof(bar->content), stdin)) {
+                break;
+            }
+            bar->content[strcspn(bar->content, "\n")] = '\0'; // replace newline
 
-        struct wl_output_ctx *output;
-        wl_list_for_each(output, &bar->wl->outputs, link) {
-            render(output, draw_bar, bar);
+            // render bar to each output
+            struct wl_output_ctx *output;
+            wl_list_for_each(output, &bar->wl->outputs, link) {
+                render(output, draw_bar, bar);
+            }
+            wl_display_flush(bar->wl->display);
         }
-        wl_display_flush(bar->wl->display);
     }
-    fclose(stdin_fp);
 
     return NULL;
 }
@@ -88,12 +114,17 @@ void wb_run(struct wb_config config) {
     bar->config = config;
     bar->wl = wl_ctx_create(config.height);
 
-    // do an initial render
+    // initial render on all outputs
     struct wl_output_ctx *output;
     wl_list_for_each(output, &bar->wl->outputs, link) {
         render(output, draw_bar, bar);
     }
     wl_display_flush(bar->wl->display);
+
+    // create exit pipe to signal thread when to exit
+    if (pipe(bar->exit_pipe) < 0) {
+        log_fatal("failed to create exit pipe");
+    }
 
     // create thread to handle stdin
     pthread_t stdin_thread;
@@ -107,6 +138,8 @@ void wb_run(struct wb_config config) {
         }
     }
 
+    // signal thread to exit
+    write(bar->exit_pipe[1], "x", 1);
     // wait for thread to finish
     pthread_join(stdin_thread, NULL);
 
