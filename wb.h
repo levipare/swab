@@ -5,6 +5,7 @@
 #include <stdbool.h>
 
 struct wb_config {
+    char font[128];
     uint32_t height;
     uint32_t bg_color, fg_color;
 };
@@ -13,7 +14,6 @@ struct wb {
     struct wl_ctx *wl;
     struct wb_config config;
     bool exit;
-    int exit_pipe[2];
 
     char content[1024];
 };

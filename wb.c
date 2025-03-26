@@ -25,7 +25,7 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
 
     PangoLayout *layout = pango_layout_new(ctx->pango);
     PangoFontDescription *font_desc =
-        pango_font_description_from_string("JetBrainsMono Nerd Font 14px");
+        pango_font_description_from_string(bar->config.font);
     pango_layout_set_font_description(layout, font_desc);
     pango_font_description_free(font_desc);
 
@@ -33,8 +33,8 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
     cairo_set_source_rgba(ctx->cr, HEX_TO_RGBA(bar->config.fg_color));
     const char *content = bar->content;
     for (int i = 0; i < 3 && *content; ++i) {
-        // find position of seperator char or null terminator
-        char *end = strchrnul(content, ALIGNMENT_SEP);
+        // find position of seperator or null terminator
+        const char *end = &content[strcspn(content, "\x1f")];
         // len does not include seperator or null terminator
         size_t len = end - content;
 
@@ -65,46 +65,19 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
 static void *handle_stdin(void *data) {
     struct wb *bar = data;
 
-    struct pollfd fds[] = {
-        [0] =
-            {
-                .fd = STDIN_FILENO,
-                .events = POLLIN,
-            },
-        [1] =
-            {
-                .fd = bar->exit_pipe[0],
-                .events = POLLIN,
-            },
-    };
+    while (fgets(bar->content, sizeof(bar->content), stdin)) {
+        // replace newline with null. If newline not
+        bar->content[strcspn(bar->content, "\n")] = '\0';
 
-    while (true) {
-        int ret = poll(fds, 2, -1);
-
-        if (ret < 0) {
-            log_fatal("poll error");
+        // render bar to each output
+        struct wl_output_ctx *output;
+        wl_list_for_each(output, &bar->wl->outputs, link) {
+            render(output, draw_bar, bar);
         }
-
-        if (fds[1].revents & POLLIN) {
-            log_info("thread exit signal recieved");
-            break;
-        }
-
-        if (fds[0].revents & POLLIN) {
-            // check if fgets detects EOF -- if so then the thread exits
-            if (!fgets(bar->content, sizeof(bar->content), stdin)) {
-                break;
-            }
-            bar->content[strcspn(bar->content, "\n")] = '\0'; // replace newline
-
-            // render bar to each output
-            struct wl_output_ctx *output;
-            wl_list_for_each(output, &bar->wl->outputs, link) {
-                render(output, draw_bar, bar);
-            }
-            wl_display_flush(bar->wl->display);
-        }
+        wl_display_flush(bar->wl->display);
     }
+
+    log_info("thread exiting");
 
     return NULL;
 }
@@ -121,11 +94,6 @@ void wb_run(struct wb_config config) {
     }
     wl_display_flush(bar->wl->display);
 
-    // create exit pipe to signal thread when to exit
-    if (pipe(bar->exit_pipe) < 0) {
-        log_fatal("failed to create exit pipe");
-    }
-
     // create thread to handle stdin
     pthread_t stdin_thread;
     pthread_create(&stdin_thread, NULL, handle_stdin, bar);
@@ -138,8 +106,6 @@ void wb_run(struct wb_config config) {
         }
     }
 
-    // signal thread to exit
-    write(bar->exit_pipe[1], "x", 1);
     // wait for thread to finish
     pthread_join(stdin_thread, NULL);
 
