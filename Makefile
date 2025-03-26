@@ -1,8 +1,8 @@
 CC = gcc
-CFLAGS = -g -Wall $(shell pkg-config --cflags wayland-client pangocairo dbus-1)
+CFLAGS = -g --std=c99 -Wall $(shell pkg-config --cflags wayland-client pangocairo dbus-1)
 LDFLAGS = $(shell pkg-config --libs wayland-client pangocairo dbus-1)
 
-BIN = a.out
+BIN = wb
 
 SRCS = $(wildcard *.c)
 OBJS = $(SRCS:.c=.o)
@@ -21,7 +21,7 @@ $(BIN): $(OBJS) $(PROTOCOL_OBJS)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 %-protocol.c: protocols/%.xml
-		wayland-scanner private-code $< $@
+	wayland-scanner private-code $< $@
 
 %-client-protocol.h: protocols/%.xml
 	wayland-scanner client-header $< $@
