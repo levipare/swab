@@ -50,7 +50,7 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
             x = ctx->width - width;
         }
 
-        cairo_move_to(ctx->cr, x, (ctx->height - height) / 2.0);
+        cairo_move_to(ctx->cr, x, ((int32_t)ctx->height - height) / 2.0);
         pango_cairo_show_layout(ctx->cr, layout);
 
         // +1 if we haven't reached the end of the content string
