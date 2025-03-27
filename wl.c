@@ -9,9 +9,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <wayland-client-protocol.h>
 #include <wayland-client.h>
-#include <wayland-util.h>
 
 #include "log.h"
 #include "pool-buffer.h"
@@ -45,21 +43,14 @@ static void output_geometry(void *data, struct wl_output *wl_output, int x,
                             int y, int physical_width, int physical_height,
                             int subpixel, const char *make, const char *model,
                             int transform) {
-    log_info("output geometry");
 }
 
 static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags,
                         int width, int height, int refresh) {
-    log_info("output mode");
-}
-
-static void output_done(void *data, struct wl_output *wl_output) {
-    log_info("output done");
 }
 
 static void output_scale(void *data, struct wl_output *wl_output,
                          int32_t scale) {
-    log_info("output scale: %d", scale);
 
     struct wl_output_ctx *output = data;
     output->scale = scale;
@@ -69,24 +60,28 @@ static void output_scale(void *data, struct wl_output *wl_output,
 
 static void output_name(void *data, struct wl_output *wl_output,
                         const char *name) {
-    log_info("output name: %s", name);
 
     struct wl_output_ctx *output = data;
-    output->name = name;
+    output->name = malloc(strlen(name) + 1);
+    strcpy(output->name, name);
 }
 
 static void output_description(void *data, struct wl_output *wl_output,
                                const char *desc) {
-    log_info("output description");
+}
+
+static void output_done(void *data, struct wl_output *wl_output) {
+    struct wl_output_ctx *output = data;
+    log_info("output %s configured, scale %d", output->name, output->scale);
 }
 
 static const struct wl_output_listener output_listener = {
     .geometry = output_geometry,
     .mode = output_mode,
-    .done = output_done,
     .scale = output_scale,
     .name = output_name,
     .description = output_description,
+    .done = output_done,
 };
 
 /* registry listener */
@@ -96,23 +91,13 @@ static void registry_global(void *data, struct wl_registry *wl_registry,
     // printf("%s %d\n", interface, version);
     struct wl_ctx *ctx = data;
     if (strcmp(interface, wl_shm_interface.name) == 0) {
-        log_info("found shm");
-
         ctx->shm = wl_registry_bind(wl_registry, name, &wl_shm_interface, 1);
     } else if (strcmp(interface, wl_compositor_interface.name) == 0) {
-        log_info("found compositor");
-
         ctx->compositor =
             wl_registry_bind(wl_registry, name, &wl_compositor_interface, 4);
     } else if (strcmp(interface, wl_output_interface.name) == 0) {
-        log_info("found output");
-
-        // TODO: create multiple wb_output
-        // each monitor needs a bar
         struct wl_output_ctx *output = calloc(1, sizeof(struct wl_output_ctx));
         output->ctx = ctx;
-        output->scale = 1;
-        output->name = "poop";
         output->output =
             wl_registry_bind(wl_registry, name, &wl_output_interface, 4);
         wl_output_add_listener(output->output, &output_listener, output);
@@ -120,8 +105,6 @@ static void registry_global(void *data, struct wl_registry *wl_registry,
         wl_list_init(&output->link);
         wl_list_insert(&ctx->outputs, &output->link);
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
-        log_info("found layer shell");
-
         ctx->layer_shell =
             wl_registry_bind(wl_registry, name, &zwlr_layer_shell_v1_interface,
                              version < 4 ? version : 4);
@@ -202,6 +185,7 @@ void wl_ctx_destroy(struct wl_ctx *ctx) {
             wl_buffer_destroy(output->buffer.buffer);
             cairo_surface_destroy(output->cairo_surface);
         }
+        free(output->name);
         free(output);
     }
 

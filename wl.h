@@ -19,7 +19,7 @@ struct wl_output_ctx {
     struct wl_ctx *ctx;
 
     struct wl_output *output;
-    const char *name;
+    char *name;
     int32_t scale;
 
     struct wl_surface *surface;
