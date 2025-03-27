@@ -78,7 +78,7 @@ static void *handle_stdin(void *data) {
 
         if (fds[0].revents & POLLIN) {
             char buf[sizeof(bar->content)];
-            if (read(STDIN_FILENO, buf, sizeof(buf)) == 0) {
+            if (read(STDIN_FILENO, buf, sizeof(buf)) == -1) {
                 log_fatal("read error");
             }
 
@@ -103,7 +103,7 @@ static void *handle_stdin(void *data) {
         }
     }
 
-    log_info("thread exiting");
+    log_info("stdin listener thread exiting");
 
     return NULL;
 }
