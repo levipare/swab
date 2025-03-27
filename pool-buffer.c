@@ -1,14 +1,12 @@
+#include "pool-buffer.h"
+
 #include <assert.h>
-#include <cairo/cairo.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <pango/pangocairo.h>
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 #include <wayland-client.h>
-
-#include "pool-buffer.h"
 
 static void randname(char *buf) {
     struct timespec ts;

@@ -1,12 +1,12 @@
-#include "wb.h"
-
 #include <getopt.h>
+
+#include "wb.h"
 
 void print_usage(const char *prog_name) {
     printf("Usage: %s [OPTION]...\n", prog_name);
-    printf("Options:\n");
     // clang-format off
     printf(
+    "Options:\n"
     "  -H, --height=NUM      set height to NUM pixels (default 20)\n"
     "  -f, --font=STR        set font description (default \"monospace 14px\")\n"
     "  -F, --fg=NUM          set foreground color in RGBA (default 0xBBBBBBFF)\n"

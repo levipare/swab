@@ -1,9 +1,6 @@
 #ifndef POOL_BUFFER_H
 #define POOL_BUFFER_H
 
-#include <cairo/cairo.h>
-#include <pango/pangocairo.h>
-#include <sys/mman.h>
 #include <wayland-client.h>
 
 struct pool_buffer {

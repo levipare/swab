@@ -1,5 +1,7 @@
+#include "wl.h"
+
 #include <assert.h>
-#include <cairo/cairo.h>
+#include <cairo.h>
 #include <fcntl.h>
 #include <pango/pangocairo.h>
 #include <stdio.h>
@@ -11,11 +13,9 @@
 #include <wayland-client.h>
 #include <wayland-util.h>
 
-#include "wlr-layer-shell-unstable-v1-client-protocol.h"
-
 #include "log.h"
 #include "pool-buffer.h"
-#include "wl.h"
+#include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 /* layer surface listener */
 static void layer_surface_configure(void *data,

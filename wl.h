@@ -4,6 +4,7 @@
 #include <cairo/cairo.h>
 #include <pango/pangocairo.h>
 #include <stdint.h>
+#include <wayland-client.h>
 
 #include "pool-buffer.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"

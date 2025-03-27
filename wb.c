@@ -1,13 +1,15 @@
-#include "cairo.h"
-#include "log.h"
 #include "wb.h"
-#include "wl.h"
 
 #include <assert.h>
+#include <cairo.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sys/select.h>
 #include <unistd.h>
 #include <wayland-client.h>
+
+#include "log.h"
+#include "wl.h"
 
 #define HEX_TO_RGBA(x)                                                         \
     ((x >> 24) & 0xFF) / 255.0, ((x >> 16) & 0xFF) / 255.0,                    \
@@ -65,16 +67,40 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
 static void *handle_stdin(void *data) {
     struct wb *bar = data;
 
-    while (fgets(bar->content, sizeof(bar->content), stdin)) {
-        // replace newline with null. If newline not
-        bar->content[strcspn(bar->content, "\n")] = '\0';
+    struct pollfd fds[] = {[0] = {.fd = STDIN_FILENO, .events = POLLIN}};
 
-        // render bar to each output
-        struct wl_output_ctx *output;
-        wl_list_for_each(output, &bar->wl->outputs, link) {
-            render(output, draw_bar, bar);
+    while (true) {
+        int ret = poll(fds, 1, -1);
+
+        if (ret < 0) {
+            log_fatal("poll error");
         }
-        wl_display_flush(bar->wl->display);
+
+        if (fds[0].revents & POLLIN) {
+            char buf[sizeof(bar->content)];
+            if (read(STDIN_FILENO, buf, sizeof(buf)) == 0) {
+                log_fatal("read error");
+            }
+
+            char *last_newline = strrchr(buf, '\n');
+            if (last_newline) {
+                *last_newline = '\0';
+            }
+            char *start = strrchr(buf, '\n');
+            if (!start) {
+                start = buf;
+            } else {
+                start++;
+            }
+            strncpy(bar->content, start, sizeof(bar->content));
+
+            // render bar to each output
+            struct wl_output_ctx *output;
+            wl_list_for_each(output, &bar->wl->outputs, link) {
+                render(output, draw_bar, bar);
+            }
+            wl_display_flush(bar->wl->display);
+        }
     }
 
     log_info("thread exiting");
