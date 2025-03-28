@@ -3,6 +3,7 @@
 
 #include <cairo/cairo.h>
 #include <pango/pangocairo.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <wayland-client.h>
 
@@ -46,7 +47,7 @@ struct wl_ctx {
 void render(struct wl_output_ctx *output,
             void (*draw)(void *, struct render_ctx *), void *data);
 
-struct wl_ctx *wl_ctx_create(uint32_t height);
+struct wl_ctx *wl_ctx_create(bool bottom, uint32_t height);
 
 void wl_ctx_destroy(struct wl_ctx *ctx);
 

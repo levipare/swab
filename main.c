@@ -9,6 +9,7 @@ void print_usage(const char *prog_name) {
     "Options:\n"
     "  -H, --height=NUM      set height to NUM pixels (default 20)\n"
     "  -f, --font=STR        set font description (default \"monospace 14px\")\n"
+    "  -b, --bottom          anchor bar to bottom of display\n"
     "  -F, --fg=NUM          set foreground color in RGBA (default 0xBBBBBBFF)\n"
     "  -B  --bg=NUM          set background color in RGBA (default 0x0C0C0CFF)\n"
     "  -h, --help            show this help message\n"
@@ -29,11 +30,12 @@ int main(int argc, char *argv[]) {
     int option_index = 0;
     struct option long_options[] = {
         {"help", no_argument, 0, 'h'},
+        {"bottom", no_argument, 0, 'b'},
         {"font", required_argument, 0, 'f'},
         {"height", required_argument, 0, 'H'},
         {0},
     };
-    while ((opt = getopt_long(argc, argv, "f:H:F:B:h", long_options,
+    while ((opt = getopt_long(argc, argv, "f:H:F:B:hb", long_options,
                               &option_index)) != -1) {
         switch (opt) {
         case 'H':
@@ -44,6 +46,9 @@ int main(int argc, char *argv[]) {
             break;
         case 'f':
             strncpy(config.font, optarg, sizeof(config.font));
+            break;
+        case 'b':
+            config.bottom = true;
             break;
         case 'F':
             config.fg_color = strtoul(optarg, NULL, 0);

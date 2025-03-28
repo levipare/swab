@@ -111,7 +111,7 @@ static void *handle_stdin(void *data) {
 void wb_run(struct wb_config config) {
     struct wb *bar = calloc(1, sizeof(*bar));
     bar->config = config;
-    bar->wl = wl_ctx_create(config.height);
+    bar->wl = wl_ctx_create(config.bottom, config.height);
 
     // initial render on all outputs
     struct wl_output_ctx *output;

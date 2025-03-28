@@ -6,6 +6,7 @@
 
 struct wb_config {
     char font[128];
+    bool bottom;
     uint32_t height;
     uint32_t bg_color, fg_color;
 };

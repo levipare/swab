@@ -4,6 +4,7 @@
 #include <cairo.h>
 #include <fcntl.h>
 #include <pango/pangocairo.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -120,7 +121,7 @@ static const struct wl_registry_listener wl_registry_listener = {
     .global_remove = registry_global_remove,
 };
 
-struct wl_ctx *wl_ctx_create(uint32_t height) {
+struct wl_ctx *wl_ctx_create(bool bottom, uint32_t height) {
     struct wl_ctx *ctx = calloc(1, sizeof(*ctx));
     wl_list_init(&ctx->outputs);
 
@@ -152,7 +153,8 @@ struct wl_ctx *wl_ctx_create(uint32_t height) {
         zwlr_layer_surface_v1_set_size(output->layer_surface, 0, height);
         zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, height);
         zwlr_layer_surface_v1_set_anchor(
-            output->layer_surface, ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP |
+            output->layer_surface, (bottom ? ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
+                                           : ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) |
                                        ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
                                        ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
         zwlr_layer_surface_v1_set_margin(output->layer_surface, 0, 0, 0, 0);
