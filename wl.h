@@ -1,8 +1,7 @@
 #ifndef WL_H
 #define WL_H
 
-#include <cairo/cairo.h>
-#include <pango/pangocairo.h>
+#include <pixman.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <wayland-client.h>
@@ -11,9 +10,8 @@
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 struct render_ctx {
-    cairo_t *cr;
-    PangoContext *pango;
     uint32_t width, height;
+    pixman_image_t *pix;
 };
 
 struct wl_output_ctx {
@@ -28,8 +26,6 @@ struct wl_output_ctx {
     uint32_t width, height; // dimensions of surface
 
     struct pool_buffer buffer;
-    // TODO: the cairo_surface should be part of pool buffer
-    cairo_surface_t *cairo_surface;
 
     struct wl_list link;
 };

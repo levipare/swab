@@ -1,6 +1,7 @@
 CC = gcc
-CFLAGS = -g --std=c99 -Wall $(shell pkg-config --cflags wayland-client pangocairo dbus-1)
-LDFLAGS = $(shell pkg-config --libs wayland-client pangocairo dbus-1)
+LIBS = wayland-client fcft pixman-1
+CFLAGS = -g --std=c99 -Wall $(shell pkg-config --cflags $(LIBS))
+LDFLAGS = $(shell pkg-config --libs $(LIBS) )
 
 BIN = wb
 

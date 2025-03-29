@@ -1,19 +1,17 @@
 #include "wl.h"
 
 #include <assert.h>
-#include <cairo.h>
 #include <fcntl.h>
-#include <pango/pangocairo.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
-#include <wayland-client-core.h>
 #include <wayland-client.h>
 
 #include "log.h"
+#include "pixman.h"
 #include "pool-buffer.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
@@ -152,31 +150,24 @@ static void render(struct wl_output_ctx *output,
 
         // create new one
         pool_buffer_create(&output->buffer, output->ctx->shm, width, height);
-
-        output->cairo_surface = cairo_image_surface_create_for_data(
-            output->buffer.data, CAIRO_FORMAT_ARGB32,
-            output->width * output->scale, output->height * output->scale,
-            output->scale * output->width * 4);
     }
 
     assert(output->output);
     assert(output->buffer.buffer);
     assert(draw);
 
-    cairo_t *cr = cairo_create(output->cairo_surface);
-    cairo_scale(cr, output->scale, output->scale);
-    PangoContext *pango = pango_cairo_create_context(cr);
+    pixman_image_t *pix = pixman_image_create_bits_no_clear(
+        PIXMAN_a8r8g8b8, width, height, output->buffer.data,
+        output->buffer.width * 4);
 
-    struct render_ctx rctx = {.cr = cr,
-                              .pango = pango,
-                              .width = output->width,
-                              .height = output->height};
+    struct render_ctx rctx = {.pix = pix,
+                              .width = output->buffer.width,
+                              .height = output->buffer.height};
 
     // call the callback associated with an output
     draw(data, &rctx);
 
-    cairo_destroy(cr);
-    g_object_unref(pango);
+    pixman_image_unref(pix);
 
     wl_surface_set_buffer_scale(output->surface, output->scale);
     wl_surface_attach(output->surface, output->buffer.buffer, 0, 0);
@@ -189,7 +180,6 @@ void schedule_frame(struct wl_ctx *ctx) {
     wl_list_for_each(output, &ctx->outputs, link) {
         render(output, ctx->draw_callback, ctx->draw_data);
     }
-    wl_display_flush(ctx->display);
 }
 
 struct wl_ctx *wl_ctx_create(bool bottom, uint32_t height,
@@ -243,7 +233,7 @@ struct wl_ctx *wl_ctx_create(bool bottom, uint32_t height,
     // render after a roundtrip
     schedule_frame(ctx);
 
-    log_info("initialized wayland");
+    log_info("wayland initialized");
     return ctx;
 }
 
@@ -258,7 +248,6 @@ void wl_ctx_destroy(struct wl_ctx *ctx) {
         zwlr_layer_surface_v1_destroy(output->layer_surface);
         if (output->buffer.buffer) {
             wl_buffer_destroy(output->buffer.buffer);
-            cairo_surface_destroy(output->cairo_surface);
         }
         free(output->name);
         free(output);
@@ -274,4 +263,6 @@ void wl_ctx_destroy(struct wl_ctx *ctx) {
     wl_display_disconnect(ctx->display);
 
     free(ctx);
+
+    log_info("wayland destroyed");
 }

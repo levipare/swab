@@ -1,4 +1,8 @@
 #include <getopt.h>
+#include <locale.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "wb.h"
 
@@ -10,20 +14,22 @@ void print_usage(const char *prog_name) {
     "  -H, --height=NUM      set height to NUM pixels (default 20)\n"
     "  -f, --font=STR        set font description (default \"monospace 14px\")\n"
     "  -b, --bottom          anchor bar to bottom of display\n"
-    "  -F, --fg=NUM          set foreground color in RGBA (default 0xBBBBBBFF)\n"
-    "  -B  --bg=NUM          set background color in RGBA (default 0x0C0C0CFF)\n"
+    "  -F, --fg=NUM          set foreground color in ARGB (default 0xFFBBBBBB)\n"
+    "  -B  --bg=NUM          set background color in ARGB (default 0xFF0C0C0C)\n"
     "  -h, --help            show this help message\n"
     );
     // clang-format on
 }
 
 int main(int argc, char *argv[]) {
+    setlocale(LC_ALL, "");
+
     // default config
     struct wb_config config = {
         .font = "monospace 14px",
         .height = 20,
-        .bg_color = 0x0C0C0CFF,
-        .fg_color = 0xBBBBBBFF,
+        .bg_color = 0xFF0C0C0C,
+        .fg_color = 0xFFBBBBBB,
     };
 
     int opt;

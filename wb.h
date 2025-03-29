@@ -8,7 +8,7 @@ struct wb_config {
     char font[128];
     bool bottom;
     uint32_t height;
-    uint32_t bg_color, fg_color;
+    uint32_t bg_color, fg_color; // ARGB
 };
 
 struct wb {
@@ -16,6 +16,7 @@ struct wb {
     struct wb_config config;
     bool exit;
 
+    struct fcft_font *font;
     char content[1024];
 };
 
