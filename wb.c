@@ -3,8 +3,6 @@
 #include <assert.h>
 #include <cairo.h>
 #include <poll.h>
-#include <pthread.h>
-#include <sys/select.h>
 #include <unistd.h>
 #include <wayland-client.h>
 
@@ -64,77 +62,59 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
     assert(content <= strchr(bar->content, '\0'));
 }
 
-static void *handle_stdin(void *data) {
-    struct wb *bar = data;
+void wb_run(struct wb_config config) {
+    struct wb *bar = calloc(1, sizeof(*bar));
+    bar->config = config;
+    bar->wl = wl_ctx_create(config.bottom, config.height, draw_bar, bar);
 
-    struct pollfd fds[] = {[0] = {.fd = STDIN_FILENO, .events = POLLIN}};
-
+    // main Loop
+    enum { POLL_STDIN, POLL_WL };
+    struct pollfd fds[] = {
+        [POLL_WL] = {.fd = bar->wl->fd, .events = POLLIN},
+        [POLL_STDIN] = {.fd = STDIN_FILENO, .events = POLLIN},
+    };
     while (true) {
-        int ret = poll(fds, 1, -1);
-
+        int ret = poll(fds, sizeof(fds) / sizeof(fds[0]), -1);
         if (ret < 0) {
             log_fatal("poll error");
         }
 
-        if (fds[0].revents & POLLIN) {
-            char buf[sizeof(bar->content)];
-            if (read(STDIN_FILENO, buf, sizeof(buf)) == -1) {
-                log_fatal("read error");
+        if (fds[POLL_WL].revents & POLLIN) {
+            wl_display_dispatch(bar->wl->display);
+        }
+
+        if (fds[POLL_STDIN].revents & POLLIN) {
+            char buf[4096];
+            ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
+            assert(n > 0);
+            buf[n] = '\0';
+
+            // it is possible that multiple events were recieved
+            // we only want the most recent one
+            char *last_nl = strrchr(buf, '\n');
+            if (!last_nl) {
+                log_error("input received does not contain newline");
+                continue;
             }
 
-            char *last_newline = strrchr(buf, '\n');
-            if (last_newline) {
-                *last_newline = '\0';
-            }
-            char *start = strrchr(buf, '\n');
-            if (!start) {
-                start = buf;
+            *last_nl = '\0';
+            char *second_last_nl = strrchr(buf, '\n');
+            if (second_last_nl) {
+                strcpy(bar->content, second_last_nl + 1);
             } else {
-                start++;
+                strcpy(bar->content, buf);
             }
-            strncpy(bar->content, start, sizeof(bar->content));
 
-            // render bar to each output
-            struct wl_output_ctx *output;
-            wl_list_for_each(output, &bar->wl->outputs, link) {
-                render(output, draw_bar, bar);
-            }
-            wl_display_flush(bar->wl->display);
+            schedule_frame(bar->wl);
+        }
+
+        if (fds[POLL_STDIN].revents & POLLHUP) {
+            fds[POLL_STDIN].fd = -1;
+            continue;
         }
     }
 
-    log_info("stdin listener thread exiting");
-
-    return NULL;
-}
-
-void wb_run(struct wb_config config) {
-    struct wb *bar = calloc(1, sizeof(*bar));
-    bar->config = config;
-    bar->wl = wl_ctx_create(config.bottom, config.height);
-
-    // initial render on all outputs
-    struct wl_output_ctx *output;
-    wl_list_for_each(output, &bar->wl->outputs, link) {
-        render(output, draw_bar, bar);
-    }
-    wl_display_flush(bar->wl->display);
-
-    // create thread to handle stdin
-    pthread_t stdin_thread;
-    pthread_create(&stdin_thread, NULL, handle_stdin, bar);
-
-    // dispatch wl events
-    while (wl_display_dispatch(bar->wl->display)) {
-        if (bar->exit) {
-            log_info("exiting");
-            break;
-        }
-    }
-
-    // wait for thread to finish
-    pthread_join(stdin_thread, NULL);
-
+    // cleanup
     if (bar->wl) {
         wl_ctx_destroy(bar->wl);
     }

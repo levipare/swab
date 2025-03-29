@@ -10,18 +10,37 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <wayland-client-core.h>
 #include <wayland-client.h>
 
 #include "log.h"
 #include "pool-buffer.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
+// struct frame_ctx {
+//     struct wl_output_ctx *output;
+// };
+
+// static const struct wl_callback_listener wl_surface_frame_listener;
+
+// static void wl_surface_frame_done(void *data, struct wl_callback *cb,
+//                                   uint32_t time) {
+//     wl_callback_destroy(cb);
+
+//     struct frame_ctx *frame = data;
+//     log_info("%s frame callback!", frame->output->name);
+
+//     free(frame);
+// }
+
+// static const struct wl_callback_listener wl_surface_frame_listener = {
+//     .done = wl_surface_frame_done,
+// };
+
 /* layer surface listener */
 static void layer_surface_configure(void *data,
                                     struct zwlr_layer_surface_v1 *surface,
                                     uint32_t serial, uint32_t w, uint32_t h) {
-    log_info("layer surface configured");
-
     struct wl_output_ctx *output = data;
     output->width = w;
     output->height = h;
@@ -121,90 +140,8 @@ static const struct wl_registry_listener wl_registry_listener = {
     .global_remove = registry_global_remove,
 };
 
-struct wl_ctx *wl_ctx_create(bool bottom, uint32_t height) {
-    struct wl_ctx *ctx = calloc(1, sizeof(*ctx));
-    wl_list_init(&ctx->outputs);
-
-    ctx->display = wl_display_connect(NULL);
-
-    ctx->registry = wl_display_get_registry(ctx->display);
-    wl_registry_add_listener(ctx->registry, &wl_registry_listener, ctx);
-    wl_display_roundtrip(ctx->display);
-
-    // make sure we have the required globals
-    assert(ctx->compositor);
-    assert(ctx->layer_shell);
-    assert(ctx->shm);
-
-    struct wl_output_ctx *output;
-    wl_list_for_each(output, &ctx->outputs, link) {
-
-        // configure each output
-        output->surface = wl_compositor_create_surface(ctx->compositor);
-
-        output->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-            ctx->layer_shell, output->surface, output->output,
-            ZWLR_LAYER_SHELL_V1_LAYER_TOP, "wb");
-
-        // TODO: figure out height situation
-        // configure the layer surface
-        // we should have a bar struct that contains config like height
-        // and then set the layer surface height based off that
-        zwlr_layer_surface_v1_set_size(output->layer_surface, 0, height);
-        zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, height);
-        zwlr_layer_surface_v1_set_anchor(
-            output->layer_surface, (bottom ? ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
-                                           : ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) |
-                                       ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
-                                       ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
-        zwlr_layer_surface_v1_set_margin(output->layer_surface, 0, 0, 0, 0);
-        zwlr_layer_surface_v1_set_keyboard_interactivity(
-            output->layer_surface,
-            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
-        zwlr_layer_surface_v1_add_listener(output->layer_surface,
-                                           &layer_surface_listener, output);
-
-        wl_surface_commit(output->surface);
-    }
-
-    wl_display_roundtrip(ctx->display);
-
-    log_info("initialized wayland");
-
-    return ctx;
-}
-
-void wl_ctx_destroy(struct wl_ctx *ctx) {
-    // destroy all output ctx's
-    struct wl_output_ctx *output, *tmp;
-    wl_list_for_each_safe(output, tmp, &ctx->outputs, link) {
-        wl_list_remove(&output->link);
-
-        wl_output_release(output->output);
-        wl_surface_destroy(output->surface);
-        zwlr_layer_surface_v1_destroy(output->layer_surface);
-        if (output->buffer.buffer) {
-            wl_buffer_destroy(output->buffer.buffer);
-            cairo_surface_destroy(output->cairo_surface);
-        }
-        free(output->name);
-        free(output);
-    }
-
-    // globals
-    zwlr_layer_shell_v1_destroy(ctx->layer_shell);
-    wl_registry_destroy(ctx->registry);
-    wl_shm_destroy(ctx->shm);
-    wl_compositor_destroy(ctx->compositor);
-
-    wl_display_flush(ctx->display);
-    wl_display_disconnect(ctx->display);
-
-    free(ctx);
-}
-
-void render(struct wl_output_ctx *output,
-            void (*draw)(void *, struct render_ctx *), void *data) {
+static void render(struct wl_output_ctx *output,
+                   void (*draw)(void *, struct render_ctx *), void *data) {
     uint32_t width = output->width * output->scale;
     uint32_t height = output->height * output->scale;
 
@@ -245,4 +182,96 @@ void render(struct wl_output_ctx *output,
     wl_surface_attach(output->surface, output->buffer.buffer, 0, 0);
     wl_surface_damage(output->surface, 0, 0, output->width, output->height);
     wl_surface_commit(output->surface);
+}
+
+void schedule_frame(struct wl_ctx *ctx) {
+    struct wl_output_ctx *output;
+    wl_list_for_each(output, &ctx->outputs, link) {
+        render(output, ctx->draw_callback, ctx->draw_data);
+    }
+    wl_display_flush(ctx->display);
+}
+
+struct wl_ctx *wl_ctx_create(bool bottom, uint32_t height,
+
+                             void (*draw)(void *, struct render_ctx *),
+                             void *data) {
+    struct wl_ctx *ctx = calloc(1, sizeof(*ctx));
+    wl_list_init(&ctx->outputs);
+    ctx->draw_callback = draw;
+    ctx->draw_data = data;
+
+    ctx->display = wl_display_connect(NULL);
+    ctx->fd = wl_display_get_fd(ctx->display);
+
+    ctx->registry = wl_display_get_registry(ctx->display);
+    wl_registry_add_listener(ctx->registry, &wl_registry_listener, ctx);
+    wl_display_roundtrip(ctx->display);
+
+    // make sure we have the required globals
+    assert(ctx->compositor);
+    assert(ctx->layer_shell);
+    assert(ctx->shm);
+
+    struct wl_output_ctx *output;
+    wl_list_for_each(output, &ctx->outputs, link) {
+        // every output has one surface associated with it
+        output->surface = wl_compositor_create_surface(ctx->compositor);
+
+        output->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+            ctx->layer_shell, output->surface, output->output,
+            ZWLR_LAYER_SHELL_V1_LAYER_TOP, "wb");
+        zwlr_layer_surface_v1_set_size(output->layer_surface, 0, height);
+        zwlr_layer_surface_v1_set_exclusive_zone(output->layer_surface, height);
+        zwlr_layer_surface_v1_set_anchor(
+            output->layer_surface, (bottom ? ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
+                                           : ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) |
+                                       ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
+                                       ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
+        zwlr_layer_surface_v1_set_margin(output->layer_surface, 0, 0, 0, 0);
+        zwlr_layer_surface_v1_set_keyboard_interactivity(
+            output->layer_surface,
+            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
+        zwlr_layer_surface_v1_add_listener(output->layer_surface,
+                                           &layer_surface_listener, output);
+
+        wl_surface_commit(output->surface);
+    }
+
+    wl_display_roundtrip(ctx->display);
+
+    // render after a roundtrip
+    schedule_frame(ctx);
+
+    log_info("initialized wayland");
+    return ctx;
+}
+
+void wl_ctx_destroy(struct wl_ctx *ctx) {
+    // destroy all output ctx's
+    struct wl_output_ctx *output, *tmp;
+    wl_list_for_each_safe(output, tmp, &ctx->outputs, link) {
+        wl_list_remove(&output->link);
+
+        wl_output_release(output->output);
+        wl_surface_destroy(output->surface);
+        zwlr_layer_surface_v1_destroy(output->layer_surface);
+        if (output->buffer.buffer) {
+            wl_buffer_destroy(output->buffer.buffer);
+            cairo_surface_destroy(output->cairo_surface);
+        }
+        free(output->name);
+        free(output);
+    }
+
+    // globals
+    zwlr_layer_shell_v1_destroy(ctx->layer_shell);
+    wl_registry_destroy(ctx->registry);
+    wl_shm_destroy(ctx->shm);
+    wl_compositor_destroy(ctx->compositor);
+
+    wl_display_flush(ctx->display);
+    wl_display_disconnect(ctx->display);
+
+    free(ctx);
 }

@@ -35,6 +35,7 @@ struct wl_output_ctx {
 };
 
 struct wl_ctx {
+    int fd;
     struct wl_display *display;
     struct wl_registry *registry;
     struct wl_shm *shm;
@@ -42,12 +43,16 @@ struct wl_ctx {
     struct zwlr_layer_shell_v1 *layer_shell;
 
     struct wl_list outputs;
+
+    void (*draw_callback)(void *, struct render_ctx *);
+    void *draw_data;
 };
 
-void render(struct wl_output_ctx *output,
-            void (*draw)(void *, struct render_ctx *), void *data);
+void schedule_frame(struct wl_ctx *ctx);
 
-struct wl_ctx *wl_ctx_create(bool bottom, uint32_t height);
+struct wl_ctx *wl_ctx_create(bool bottom, uint32_t height,
+                             void (*draw)(void *, struct render_ctx *),
+                             void *data);
 
 void wl_ctx_destroy(struct wl_ctx *ctx);
 
