@@ -1,23 +1,25 @@
 #include "wb.h"
 
 #include <assert.h>
+#include <ctype.h>
 #include <fcft/fcft.h>
 #include <poll.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <uchar.h>
 #include <unistd.h>
+#include <wayland-client-core.h>
 #include <wayland-client.h>
 #include <wchar.h>
 
 #include "log.h"
 #include "pixman.h"
-#include "wl.h"
+#include "wayland.h"
 
 #define ALIGNMENT_SEP '\x1f'
 
-pixman_color_t argb_to_pixman(uint32_t argb) {
+static pixman_color_t argb_to_pixman(uint32_t argb) {
     uint16_t a = (argb >> 24) & 0xFF;
     uint16_t r = (argb >> 16) & 0xFF;
     uint16_t g = (argb >> 8) & 0xFF;
@@ -33,6 +35,72 @@ pixman_color_t argb_to_pixman(uint32_t argb) {
     return color;
 }
 
+enum align { ALIGN_START, ALIGN_CENTER, ALIGN_END };
+
+static void draw_text(struct fcft_font *font, pixman_image_t *pix,
+                      pixman_color_t *color, const char *str, size_t len,
+                      int32_t x, int32_t y, enum align horiz, enum align vert) {
+    wchar_t wstr[len];
+    int n = mbstowcs(wstr, str, len);
+    if (n == -1) {
+        log_fatal("failed to convert multi-byte string to wchar_t string");
+    }
+    struct fcft_text_run *text_run = fcft_rasterize_text_run_utf32(
+        font, n, (uint32_t *)wstr, FCFT_SUBPIXEL_NONE);
+    assert(text_run);
+
+    // calculate width of the run
+    int run_width = 0;
+    for (int i = 0; i < text_run->count; ++i) {
+        const struct fcft_glyph *g = text_run->glyphs[i];
+        run_width += g->advance.x;
+    }
+
+    switch (horiz) {
+    case ALIGN_START:
+        break;
+    case ALIGN_CENTER:
+        x -= run_width / 2;
+        break;
+    case ALIGN_END:
+        x -= run_width;
+        break;
+    }
+
+    switch (vert) {
+    case ALIGN_START:
+        y += font->ascent;
+        break;
+    case ALIGN_CENTER:
+        y += (font->ascent + font->descent) / 2.0 -
+             (font->descent > 0 ? font->descent : 0);
+        break;
+    case ALIGN_END:
+        break;
+    }
+    log_info("%d", y);
+    log_info("%d %d %d", font->ascent, font->descent, font->height);
+
+    pixman_image_t *clr_pix = pixman_image_create_solid_fill(color);
+
+    // render each glyph
+    for (int i = 0; i < text_run->count; ++i) {
+        const struct fcft_glyph *g = text_run->glyphs[i];
+        if (g->is_color_glyph) {
+            pixman_image_composite32(PIXMAN_OP_OVER, g->pix, NULL, pix, 0, 0, 0,
+                                     0, x + g->x, y - g->y, g->width,
+                                     g->height);
+        } else {
+            pixman_image_composite32(PIXMAN_OP_OVER, clr_pix, g->pix, pix, 0, 0,
+                                     0, 0, x + g->x, y - g->y, g->width,
+                                     g->height);
+        }
+        x += g->advance.x;
+    }
+    pixman_image_unref(clr_pix);
+    fcft_text_run_destroy(text_run);
+}
+
 static void draw_bar(void *data, struct render_ctx *ctx) {
     struct wb *bar = data;
 
@@ -43,135 +111,162 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
         &(pixman_rectangle16_t){0, 0, ctx->width, ctx->height});
 
     // draw text
-    const char *content = bar->content;
-    for (int i = 0; i < 3 && *content; ++i) {
+    pixman_color_t fg = argb_to_pixman(bar->config.fg_color);
+    const char *status = bar->status;
+    for (int i = 0; i < 3 && *status; ++i) {
         // find position of seperator or null terminator
-        const char *end = &content[strcspn(content, "\x1f")];
+        const char *end = &status[strcspn(status, "\x1f")];
         // len does not include seperator or null terminator
-        size_t len = end - content;
+        size_t len = end - status;
 
-        // convert input string to wc string
-        wchar_t str[len];
-        int n = mbstowcs(str, content, len);
-        if (n == -1) {
-            log_fatal("failed to convert multi-byte string to wchar_t string");
+        enum align horiz = ALIGN_START;
+        int32_t x = 0;
+        switch (i) {
+        case 1:
+            horiz = ALIGN_CENTER;
+            x = ctx->width / 2;
+            break;
+        case 2:
+            horiz = ALIGN_END;
+            x = ctx->width;
+            break;
         }
-        struct fcft_text_run *text_run = fcft_rasterize_text_run_utf32(
-            bar->font, n, (uint32_t *)str, FCFT_SUBPIXEL_DEFAULT);
-        assert(text_run);
 
-        // calculate width of the run
-        int run_width = 0;
-        for (int i = 0; i < text_run->count; ++i) {
-            const struct fcft_glyph *g = text_run->glyphs[i];
-            run_width += g->advance.x;
-        }
-        // calculate alignment (left, center, right)
-        int x = 0;
-        if (i == 1) {
-            x = (ctx->width - run_width) / 2;
-        } else if (i == 2) {
-            x = ctx->width - run_width;
-        }
-        // center text vertically
-        int y = (ctx->height - bar->font->height) / 2;
+        draw_text(bar->font, ctx->pix, &fg, status, len, x, ctx->height / 2,
+                  horiz, ALIGN_CENTER);
 
-        uint32_t fg_color = bar->config.fg_color;
-        pixman_color_t fg = {
-            (fg_color >> 8) & 0xFF00,
-            (fg_color) & 0xFF00,
-            (fg_color << 8) & 0xFF00,
-            (fg_color >> 16) & 0xFF00,
-        };
-        pixman_image_t *clr_pix = pixman_image_create_solid_fill(&fg);
-        // render each glyph
-        for (int i = 0; i < text_run->count; ++i) {
-            const struct fcft_glyph *g = text_run->glyphs[i];
-            pixman_image_composite32(
-                PIXMAN_OP_OVER, clr_pix, g->pix, ctx->pix, 0, 0, 0, 0, x + g->x,
-                y + bar->font->ascent - g->y, g->width, g->height);
-            x += g->advance.x;
-            y += g->advance.y;
-        }
-        pixman_image_unref(clr_pix);
-        fcft_text_run_destroy(text_run);
-
-        // +1 if we haven't reached the end of the content string
-        content += len + (*end == ALIGNMENT_SEP);
+        // +1 if we haven't reached the end of the status string
+        status += len + (*end == ALIGNMENT_SEP);
     }
 
     // sanity check to ensure no buffer overflow
-    assert(content <= strchr(bar->content, '\0'));
+    assert(status <= strchr(bar->status, '\0'));
 }
 
-void wb_run(struct wb_config config) {
-    struct wb *bar = calloc(1, sizeof(*bar));
-    bar->config = config;
-    bar->wl = wl_ctx_create(config.bottom, config.height, draw_bar, bar);
+static int read_in_status(struct wb *bar) {
+    char buf[4096];
+    ssize_t n = read(STDIN_FILENO, buf, sizeof(buf) - 1);
+    if (n <= 0) {
+        return -1;
+    }
+    buf[n] = '\0';
 
-    // load font
-    fcft_init(FCFT_LOG_COLORIZE_AUTO, false, FCFT_LOG_CLASS_NONE);
-    bar->font = fcft_from_name(1, (const char *[]){"monospace:size=24"}, NULL);
-    assert(bar->font);
-    log_info("using font: %s", bar->font->name);
+    // it is possible that multiple events were recieved
+    // so we want the most recent one
+    char *last_nl = strrchr(buf, '\n');
+    if (!last_nl) {
+        return -1;
+    }
 
-    // main loop
+    *last_nl = '\0';
+    char *second_last_nl = strrchr(buf, '\n');
+    strcpy(bar->status, second_last_nl ? second_last_nl + 1 : buf);
+
+    return 0;
+}
+
+static void loop(struct wb *bar) {
     enum { POLL_STDIN, POLL_WL };
     struct pollfd fds[] = {
-        [POLL_WL] = {.fd = bar->wl->fd, .events = POLLIN | POLLOUT},
+        [POLL_WL] = {.fd = bar->wl->fd, .events = POLLIN},
         [POLL_STDIN] = {.fd = STDIN_FILENO, .events = POLLIN},
     };
     while (true) {
-        int ret = poll(fds, sizeof(fds) / sizeof(fds[0]), -1);
+        int ret;
+        do {
+            ret = wl_display_dispatch_pending(bar->wl->display);
+            wl_display_flush(bar->wl->display);
+        } while (ret == -1);
+
+        ret = poll(fds, sizeof(fds) / sizeof(fds[0]), -1);
         if (ret < 0) {
-            log_fatal("poll error");
+            log_fatal("poll failed");
         }
 
         // wayland events
         if (fds[POLL_WL].revents & POLLIN) {
             wl_display_dispatch(bar->wl->display);
         }
-
-        if (fds[POLL_WL].revents & POLLOUT) {
-            wl_display_flush(bar->wl->display);
-        }
-
         if (fds[POLL_WL].revents & POLLHUP) {
             break;
         }
 
         // stdin events
         if (fds[POLL_STDIN].revents & POLLIN) {
-            char buf[4096];
-            ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
-            assert(n > 0);
-            buf[n] = '\0';
-
-            // it is possible that multiple events were recieved
-            // we only want the most recent one
-            char *last_nl = strrchr(buf, '\n');
-            if (!last_nl) {
-                log_error("input received does not contain newline");
+            if (read_in_status(bar) != 0) {
+                log_error("error while reading in status");
                 continue;
             }
 
-            *last_nl = '\0';
-            char *second_last_nl = strrchr(buf, '\n');
-            strcpy(bar->content, second_last_nl ? second_last_nl + 1 : buf);
-
             schedule_frame(bar->wl);
         }
-
         if (fds[POLL_STDIN].revents & POLLHUP) {
             fds[POLL_STDIN].fd = -1; // disable polling of stdin
         }
     }
+}
+
+void wb_run(struct wb_config config) {
+    struct wb *bar = calloc(1, sizeof(*bar));
+    bar->config = config;
+    bar->wl = wayland_create(config.bottom, config.height, draw_bar, bar);
+
+    // calculate monitor dpi
+    float dpi;
+    int32_t scale;
+    struct wayland_monitor *mon;
+    wl_list_for_each(mon, &bar->wl->monitors, link) {
+        dpi = mon->dpi;
+        scale = mon->scale;
+    }
+
+    // hacky way of scaling fonts with pixelsize
+    // we parse the provided pixelsize and then multiply it by the scale factor
+    // and then replace the original pixelsize
+    char *pixelsize_ptr = strstr(bar->config.font, "pixelsize=");
+    if (pixelsize_ptr) {
+        pixelsize_ptr += strlen("pixelsize=");
+
+        char tmp[10];
+        int i = 0;
+        while (i < sizeof(tmp) - 1 && pixelsize_ptr &&
+               isdigit(*pixelsize_ptr)) {
+            tmp[i++] = *pixelsize_ptr++;
+        }
+        tmp[i] = '\0';
+        int oldlen = strlen(tmp);
+
+        double ps = atof(tmp) * scale;
+        snprintf(tmp, sizeof(tmp), "%f", ps);
+        int newlen = strlen(tmp);
+        int diff = newlen - oldlen;
+        if (diff != 0) {
+            memmove(pixelsize_ptr + diff, pixelsize_ptr,
+                    strlen(pixelsize_ptr) + 1);
+        }
+        memcpy(pixelsize_ptr - oldlen, tmp, newlen);
+    }
+
+    fcft_init(FCFT_LOG_COLORIZE_AUTO, false, FCFT_LOG_CLASS_NONE);
+
+    // set appropriate dpi and scaling attributes
+    char attrs[64];
+    snprintf(attrs, sizeof(attrs), "dpi=%.f", dpi);
+
+    // load font
+    const char *fonts[] = {bar->config.font};
+    bar->font = fcft_from_name(1, fonts, attrs);
+    assert(bar->font);
+    log_info("using font: %s %d", bar->font->name);
+
+    loop(bar);
 
     // cleanup
     if (bar->wl) {
-        wl_ctx_destroy(bar->wl);
+        wayland_destroy(bar->wl);
     }
 
     fcft_destroy(bar->font);
+    fcft_fini();
     free(bar);
 }

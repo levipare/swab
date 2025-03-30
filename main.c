@@ -12,7 +12,7 @@ void print_usage(const char *prog_name) {
     printf(
     "Options:\n"
     "  -H, --height=NUM      set height to NUM pixels (default 20)\n"
-    "  -f, --font=STR        set font description (default \"monospace 14px\")\n"
+    "  -f, --font=STR        set font description (default \"monospace:size=10\")\n"
     "  -b, --bottom          anchor bar to bottom of display\n"
     "  -F, --fg=NUM          set foreground color in ARGB (default 0xFFBBBBBB)\n"
     "  -B  --bg=NUM          set background color in ARGB (default 0xFF0C0C0C)\n"
@@ -26,7 +26,7 @@ int main(int argc, char *argv[]) {
 
     // default config
     struct wb_config config = {
-        .font = "monospace 14px",
+        .font = "monospace:size=10",
         .height = 20,
         .bg_color = 0xFF0C0C0C,
         .fg_color = 0xFFBBBBBB,
