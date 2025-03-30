@@ -38,10 +38,11 @@ static pixman_color_t argb_to_pixman(uint32_t argb) {
 enum align { ALIGN_START, ALIGN_CENTER, ALIGN_END };
 
 static void draw_text(struct fcft_font *font, pixman_image_t *pix,
-                      pixman_color_t *color, const char *str, size_t len,
-                      int32_t x, int32_t y, enum align horiz, enum align vert) {
+                      pixman_color_t *color, const char *cstr, int32_t x,
+                      int32_t y, enum align horiz, enum align vert) {
+    size_t len = strlen(cstr);
     wchar_t wstr[len];
-    int n = mbstowcs(wstr, str, len);
+    int n = mbstowcs(wstr, cstr, len);
     if (n == -1) {
         log_fatal("failed to convert multi-byte string to wchar_t string");
     }
@@ -78,8 +79,6 @@ static void draw_text(struct fcft_font *font, pixman_image_t *pix,
     case ALIGN_END:
         break;
     }
-    log_info("%d", y);
-    log_info("%d %d %d", font->ascent, font->descent, font->height);
 
     pixman_image_t *clr_pix = pixman_image_create_solid_fill(color);
 
@@ -118,6 +117,9 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
         const char *end = &status[strcspn(status, "\x1f")];
         // len does not include seperator or null terminator
         size_t len = end - status;
+        char comp[len + 1];
+        memcpy(comp, status, len);
+        comp[len] = '\0';
 
         enum align horiz = ALIGN_START;
         int32_t x = 0;
@@ -132,8 +134,8 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
             break;
         }
 
-        draw_text(bar->font, ctx->pix, &fg, status, len, x, ctx->height / 2,
-                  horiz, ALIGN_CENTER);
+        draw_text(bar->font, ctx->pix, &fg, comp, x, ctx->height / 2, horiz,
+                  ALIGN_CENTER);
 
         // +1 if we haven't reached the end of the status string
         status += len + (*end == ALIGNMENT_SEP);
