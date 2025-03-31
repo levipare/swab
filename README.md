@@ -25,7 +25,7 @@ while date; do sleep 1; done | wb
 
 ## Configuration
 **wb** is configured via command flags. Run `wb --help` to view the options.
-> View `man fonts-conf` to see the avaible font config attributes.
+> View `man fonts-conf` to see the available font config attributes.
 
 The following sets the font (in pt), foreground color (ARGB), and background color (ARGB).
 ```sh
