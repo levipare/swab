@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <fcntl.h>
 #include <math.h>
+#include <pixman.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +13,6 @@
 #include <wayland-client.h>
 
 #include "log.h"
-#include "pixman.h"
 #include "pool-buffer.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
@@ -99,6 +99,7 @@ static void output_scale(void *data, struct wl_output *wl_output,
 static void output_name(void *data, struct wl_output *wl_output,
                         const char *name) {
     struct wayland_monitor *mon = data;
+    free(mon->name);
     mon->name = malloc(strlen(name) + 1);
     strcpy(mon->name, name);
 }
