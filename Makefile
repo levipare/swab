@@ -13,9 +13,9 @@ PROTOCOL_SRCS = $(PROTOCOLS:protocols/%.xml=%-protocol.c)
 PROTOCOL_OBJS = $(PROTOCOLS:protocols/%.xml=%-protocol.o)
 PROTOCOL_HEADERS = $(PROTOCOLS:protocols/%.xml=%-client-protocol.h)
 
-all: $(PROTOCOL_HEADERS) $(BIN)
+all: $(BIN)
 
-$(BIN): $(OBJS) $(PROTOCOL_OBJS)
+$(BIN): $(PROTOCOL_HEADERS) $(PROTOCOL_OBJS) $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) $^ -o $(BIN)
 
 %.o: %.c
@@ -27,6 +27,11 @@ $(BIN): $(OBJS) $(PROTOCOL_OBJS)
 %-client-protocol.h: protocols/%.xml
 	wayland-scanner client-header $< $@
 
+install: $(BIN)
+	install -m 0755 $(BIN) /usr/local/bin/$(BIN)
+
+uninstall:
+	rm /usr/local/bin/$(BIN)
 
 clean:
 	rm -f $(BIN) $(OBJS) $(PROTOCOL_OBJS) $(PROTOCOL_HEADERS) 
