@@ -1,7 +1,9 @@
 # wb
-**wb** is a simple status bar for wayland compositors that implement the [layer shell protocol](https://wayland.app/protocols/wlr-layer-shell-unstable-v1#compositor-support).
 
+**wb** is a simple status bar for wayland compositors that implement the [layer shell protocol](https://wayland.app/protocols/wlr-layer-shell-unstable-v1#compositor-support).
 The status is read from stdin and is expected to be newline terminated and utf-8 encoded.
+
+![image](https://github.com/user-attachments/assets/8f08ad85-897e-4ef7-b9bd-516c0f170de7)
 
 ## Dependencies
 - wayland
