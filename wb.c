@@ -3,18 +3,17 @@
 #include <assert.h>
 #include <ctype.h>
 #include <fcft/fcft.h>
+#include <pixman.h>
 #include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <uchar.h>
 #include <unistd.h>
-#include <wayland-client-core.h>
 #include <wayland-client.h>
-#include <wchar.h>
 
 #include "log.h"
-#include "pixman.h"
 #include "wayland.h"
 
 #define ALIGNMENT_SEP '\x1f'
@@ -35,19 +34,56 @@ static pixman_color_t argb_to_pixman(uint32_t argb) {
     return color;
 }
 
+size_t mbsntoc32(char32_t *dst, const char *src, size_t nms, size_t len) {
+    mbstate_t ps = {0};
+
+    char32_t *out = dst;
+    const char *in = src;
+
+    size_t consumed = 0;
+    size_t chars = 0;
+    size_t rc;
+
+    while ((out == NULL || chars < len) && consumed < nms &&
+           (rc = mbrtoc32(out, in, nms - consumed, &ps)) != 0) {
+        switch (rc) {
+        case 0:
+            goto done;
+
+        case (size_t)-1:
+        case (size_t)-2:
+        case (size_t)-3:
+            goto err;
+        }
+
+        in += rc;
+        consumed += rc;
+        chars++;
+
+        if (out != NULL)
+            out++;
+    }
+
+done:
+    return chars;
+
+err:
+    return (size_t)-1;
+}
+
 enum align { ALIGN_START, ALIGN_CENTER, ALIGN_END };
 
 static void draw_text(struct fcft_font *font, pixman_image_t *pix,
                       pixman_color_t *color, const char *cstr, int32_t x,
                       int32_t y, enum align horiz, enum align vert) {
     size_t len = strlen(cstr);
-    wchar_t wstr[len];
-    int n = mbstowcs(wstr, cstr, len);
-    if (n == -1) {
+    char32_t str32[len];
+    size_t n = mbsntoc32(str32, cstr, len + 1, len);
+    if (n == (size_t)-1) {
         log_fatal("failed to convert multi-byte string to wchar_t string");
     }
-    struct fcft_text_run *text_run = fcft_rasterize_text_run_utf32(
-        font, n, (uint32_t *)wstr, FCFT_SUBPIXEL_NONE);
+    struct fcft_text_run *text_run =
+        fcft_rasterize_text_run_utf32(font, n, str32, FCFT_SUBPIXEL_NONE);
     assert(text_run);
 
     // calculate width of the run
