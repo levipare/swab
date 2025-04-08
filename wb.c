@@ -198,7 +198,9 @@ static int read_in_status(struct wb *bar) {
 
     *last_nl = '\0';
     char *second_last_nl = strrchr(buf, '\n');
-    strcpy(bar->status, second_last_nl ? second_last_nl + 1 : buf);
+    strncpy(bar->status, second_last_nl ? second_last_nl + 1 : buf,
+            sizeof(bar->status));
+    bar->status[sizeof(bar->status) - 1] = '\0';
 
     return 0;
 }

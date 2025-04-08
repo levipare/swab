@@ -100,8 +100,7 @@ static void output_name(void *data, struct wl_output *wl_output,
                         const char *name) {
     struct wayland_monitor *mon = data;
     free(mon->name);
-    mon->name = malloc(strlen(name) + 1);
-    strcpy(mon->name, name);
+    mon->name = strdup(name);
 }
 
 static void output_description(void *data, struct wl_output *wl_output,

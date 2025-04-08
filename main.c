@@ -52,6 +52,7 @@ int main(int argc, char *argv[]) {
             break;
         case 'f':
             strncpy(config.font, optarg, sizeof(config.font));
+            config.font[sizeof(config.font) - 1] = '\0';
             break;
         case 'b':
             config.bottom = true;
