@@ -1,5 +1,5 @@
 CC = gcc
-LIBS = wayland-client fcft pixman-1
+LIBS = wayland-client fontconfig fcft pixman-1
 CFLAGS = -g --std=gnu99 -Wall $(shell pkg-config --cflags $(LIBS))
 LDFLAGS = -lm $(shell pkg-config --libs $(LIBS) )
 
