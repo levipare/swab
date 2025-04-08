@@ -20,19 +20,6 @@ struct wayland_monitor {
     struct wl_output *output;
     char *name;
     int32_t scale;
-    struct {
-        // physical size in mm
-        struct {
-            int32_t width;
-            int32_t height;
-        } mm;
-        // physical px (not scaled)
-        struct {
-            int32_t width;
-            int32_t height;
-        } px;
-    } dim;
-    float dpi;
 
     struct wl_surface *surface;
     struct zwlr_layer_surface_v1 *layer_surface;

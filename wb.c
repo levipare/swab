@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <ctype.h>
 #include <fcft/fcft.h>
+#include <fontconfig/fontconfig.h>
 #include <pixman.h>
 #include <poll.h>
 #include <stdint.h>
@@ -205,6 +206,38 @@ static int read_in_status(struct wb *bar) {
     return 0;
 }
 
+static struct fcft_font *scaled_font(char *pattern, int32_t scale) {
+    FcPattern *pat = FcNameParse((const FcChar8 *)pattern);
+    double pt_size = -1.0;
+    FcResult have_pt_size = FcPatternGetDouble(pat, FC_SIZE, 0, &pt_size);
+
+    double px_size = -1.0;
+    FcResult have_px_size = FcPatternGetDouble(pat, FC_PIXEL_SIZE, 0, &px_size);
+
+    FcPatternRemove(pat, FC_SIZE, 0);
+    FcPatternRemove(pat, FC_PIXEL_SIZE, 0);
+
+    char *stripped_pattern = (char *)FcNameUnparse(pat);
+
+    char font_pattern[256];
+    strcpy(font_pattern, stripped_pattern);
+    if (have_pt_size == FcResultMatch) {
+        sprintf(font_pattern + strlen(font_pattern), ":size=%f",
+                pt_size * scale);
+    }
+    if (have_px_size == FcResultMatch) {
+        sprintf(font_pattern + strlen(font_pattern), ":pixelsize=%f",
+                px_size * scale);
+    }
+
+    log_info(font_pattern);
+    free(stripped_pattern);
+    FcPatternDestroy(pat);
+
+    const char *fonts[] = {font_pattern};
+    return fcft_from_name(1, fonts, NULL);
+}
+
 static void loop(struct wb *bar) {
     enum { POLL_STDIN, POLL_WL };
     struct pollfd fds[] = {
@@ -252,52 +285,20 @@ void wb_run(struct wb_config config) {
     bar->wl = wayland_create(config.bottom, config.height, draw_bar, bar);
 
     // calculate monitor dpi
-    float dpi;
     int32_t scale;
     struct wayland_monitor *mon;
     wl_list_for_each(mon, &bar->wl->monitors, link) {
-        dpi = mon->dpi;
         scale = mon->scale;
-    }
-
-    // hacky way of scaling fonts with pixelsize
-    // we parse the provided pixelsize and then multiply it by the scale factor
-    // and then replace the original pixelsize
-    char *pixelsize_ptr = strstr(bar->config.font, "pixelsize=");
-    if (pixelsize_ptr) {
-        pixelsize_ptr += strlen("pixelsize=");
-
-        char tmp[10];
-        int i = 0;
-        while (i < sizeof(tmp) - 1 && pixelsize_ptr &&
-               isdigit(*pixelsize_ptr)) {
-            tmp[i++] = *pixelsize_ptr++;
-        }
-        tmp[i] = '\0';
-        int oldlen = strlen(tmp);
-
-        double ps = atof(tmp) * scale;
-        snprintf(tmp, sizeof(tmp), "%f", ps);
-        int newlen = strlen(tmp);
-        int diff = newlen - oldlen;
-        if (diff != 0) {
-            memmove(pixelsize_ptr + diff, pixelsize_ptr,
-                    strlen(pixelsize_ptr) + 1);
-        }
-        memcpy(pixelsize_ptr - oldlen, tmp, newlen);
     }
 
     fcft_init(FCFT_LOG_COLORIZE_AUTO, false, FCFT_LOG_CLASS_NONE);
 
-    // set appropriate dpi and scaling attributes
-    char attrs[64];
-    snprintf(attrs, sizeof(attrs), "dpi=%.f", dpi);
-
     // load font
-    const char *fonts[] = {bar->config.font};
-    bar->font = fcft_from_name(1, fonts, attrs);
-    assert(bar->font);
-    log_info("using font: %s %d", bar->font->name);
+    bar->font = scaled_font(bar->config.font, scale);
+    if (!bar->font) {
+        log_fatal("failed to load font from name");
+    }
+    log_info("using font: %s", bar->font->name);
 
     loop(bar);
 

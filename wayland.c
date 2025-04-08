@@ -78,16 +78,12 @@ static void output_geometry(void *data, struct wl_output *wl_output, int32_t x,
                             int32_t physical_height, int32_t subpixel,
                             const char *make, const char *model,
                             int32_t transform) {
-    struct wayland_monitor *mon = data;
-    mon->dim.mm.width = physical_width;
-    mon->dim.mm.height = physical_height;
+    // not needed
 }
 
 static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags,
                         int32_t width, int32_t height, int32_t refresh) {
-    struct wayland_monitor *mon = data;
-    mon->dim.px.width = width;
-    mon->dim.px.height = width;
+    // not needed
 }
 
 static void output_scale(void *data, struct wl_output *wl_output,
@@ -111,18 +107,7 @@ static void output_description(void *data, struct wl_output *wl_output,
 static void output_done(void *data, struct wl_output *wl_output) {
     struct wayland_monitor *mon = data;
 
-    // calculate dpi
-    const int32_t width_px = mon->dim.px.width;
-    const int32_t height_px = mon->dim.px.height;
-    const int32_t width_mm = mon->dim.mm.width;
-    const int32_t height_mm = mon->dim.mm.height;
-    const float diag_in =
-        sqrt(pow(width_mm, 2) + pow(height_mm, 2)) * 0.03937008;
-    const float diag_px = sqrt(pow(width_px, 2) + pow(height_px, 2));
-    mon->dpi = width_mm == 0 && height_mm == 0 ? 96. : diag_px / diag_in;
-
-    log_info("monitor %s configured, dpi %.f, scale %d", mon->name, mon->dpi,
-             mon->scale);
+    log_info("monitor %s configured, scale %d", mon->name, mon->scale);
 
     if (mon->surface) {
         render(mon, mon->wl->draw, mon->wl->draw_data);
