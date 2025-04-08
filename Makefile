@@ -1,6 +1,6 @@
 CC = gcc
 LIBS = wayland-client fcft pixman-1
-CFLAGS = -g --std=c99 -Wall $(shell pkg-config --cflags $(LIBS))
+CFLAGS = -g --std=gnu99 -Wall $(shell pkg-config --cflags $(LIBS))
 LDFLAGS = -lm $(shell pkg-config --libs $(LIBS) )
 
 BIN = wb
