@@ -2,7 +2,6 @@
 
 #include <assert.h>
 #include <fcntl.h>
-#include <math.h>
 #include <pixman.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -141,7 +140,6 @@ static void registry_global(void *data, struct wl_registry *wl_registry,
             wl_registry_bind(wl_registry, name, &wl_output_interface, 4);
         wl_output_add_listener(mon->output, &output_listener, mon);
 
-        wl_list_init(&mon->link);
         wl_list_insert(&wl->monitors, &mon->link);
     } else if (strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
         wl->layer_shell =
