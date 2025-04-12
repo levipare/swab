@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "wayland.h"
 
@@ -19,7 +20,7 @@ struct wb {
     bool exit;
 
     struct fcft_font *font;
-    char status[1024];
+    char status[BUFSIZ];
 };
 
 void wb_run(struct wb_config config);
