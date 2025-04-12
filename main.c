@@ -6,16 +6,24 @@
 
 #include "wb.h"
 
+#define STR(s) #s
+#define XSTR(s) STR(s)
+
+#define DEFAULT_FONT "monospace:size=14"
+#define DEFAULT_HEIGHT 20
+#define DEFAULT_FG 0xFFBBBBBB
+#define DEFAULT_BG 0xFF0C0C0C
+
 void print_usage(const char *prog_name) {
     printf("Usage: %s [OPTION]...\n", prog_name);
     // clang-format off
     printf(
     "Options:\n"
-    "  -H, --height=NUM      set height to NUM pixels (default 20)\n"
-    "  -f, --font=STR        set font description (default \"monospace:size=10\")\n"
+    "  -H, --height=NUM      set height to NUM pixels (default " XSTR(DEFAULT_HEIGHT) ")\n"
+    "  -f, --font=STR        set font description (default " DEFAULT_FONT ")\n"
     "  -b, --bottom          anchor bar to bottom of display\n"
-    "  -F, --fg=NUM          set foreground color in ARGB (default 0xFFBBBBBB)\n"
-    "  -B  --bg=NUM          set background color in ARGB (default 0xFF0C0C0C)\n"
+    "  -F, --fg=NUM          set foreground color in ARGB (default " XSTR(DEFAULT_FG) ")\n"
+    "  -B  --bg=NUM          set background color in ARGB (default " XSTR(DEFAULT_BG) ")\n"
     "  -h, --help            show this help message\n"
     );
     // clang-format on
@@ -26,10 +34,10 @@ int main(int argc, char *argv[]) {
 
     // default config
     struct wb_config config = {
-        .font = "monospace:size=10",
-        .height = 20,
-        .bg_color = 0xFF0C0C0C,
-        .fg_color = 0xFFBBBBBB,
+        .font = DEFAULT_FONT,
+        .height = DEFAULT_HEIGHT,
+        .fg_color = DEFAULT_FG,
+        .bg_color = DEFAULT_BG,
     };
 
     int opt;
