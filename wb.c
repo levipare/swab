@@ -1,7 +1,6 @@
 #include "wb.h"
 
 #include <assert.h>
-#include <ctype.h>
 #include <fcft/fcft.h>
 #include <fontconfig/fontconfig.h>
 #include <pixman.h>
@@ -78,6 +77,10 @@ static void draw_text(struct fcft_font *font, pixman_image_t *pix,
                       pixman_color_t *color, const char *cstr, int32_t x,
                       int32_t y, enum align horiz, enum align vert) {
     size_t len = strlen(cstr);
+    if (len == 0) {
+        return;
+    }
+
     char32_t str32[len];
     size_t n = mbsntoc32(str32, cstr, len + 1, len);
     if (n == (size_t)-1) {
@@ -182,31 +185,33 @@ static void draw_bar(void *data, struct render_ctx *ctx) {
     assert(status <= strchr(bar->status, '\0'));
 }
 
-static int read_in_status(struct wb *bar) {
-    char buf[4096];
-    ssize_t n = read(STDIN_FILENO, buf, sizeof(buf) - 1);
-    if (n <= 0) {
-        return -1;
-    }
-    buf[n] = '\0';
+// Expects a pointer to a heap allocated string and will reallocate the given
+// string in order to append the formatted string
+static void strappf(char **cstr_ptr, const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int attr_len = vsnprintf(NULL, 0, fmt, args);
+    va_end(args);
 
-    // it is possible that multiple events were recieved
-    // so we want the most recent one
-    char *last_nl = strrchr(buf, '\n');
-    if (!last_nl) {
-        return -1;
-    }
+    assert(attr_len >= 0);
 
-    *last_nl = '\0';
-    char *second_last_nl = strrchr(buf, '\n');
-    strncpy(bar->status, second_last_nl ? second_last_nl + 1 : buf,
-            sizeof(bar->status));
-    bar->status[sizeof(bar->status) - 1] = '\0';
+    // allocate space for attribute
+    *cstr_ptr = realloc(*cstr_ptr, strlen(*cstr_ptr) + attr_len + 1);
 
-    return 0;
+    // format
+    char attr[attr_len + 1];
+    va_start(args, fmt);
+    vsnprintf(attr, sizeof(attr), fmt, args);
+    va_end(args);
+
+    // append
+    strcat(*cstr_ptr, attr);
 }
 
-static struct fcft_font *scaled_font(char *pattern, int32_t scale) {
+// takes a fontconfig font pattern and scales the size and pixelsize
+// attributes according to the scale paramter
+// * returns a heap allocated string
+static char *scale_font_pattern(const char *pattern, int32_t scale) {
     FcPattern *pat = FcNameParse((const FcChar8 *)pattern);
     double pt_size = -1.0;
     FcResult have_pt_size = FcPatternGetDouble(pat, FC_SIZE, 0, &pt_size);
@@ -217,29 +222,21 @@ static struct fcft_font *scaled_font(char *pattern, int32_t scale) {
     FcPatternRemove(pat, FC_SIZE, 0);
     FcPatternRemove(pat, FC_PIXEL_SIZE, 0);
 
-    char *stripped_pattern = (char *)FcNameUnparse(pat);
-
-    char font_pattern[256];
-    strcpy(font_pattern, stripped_pattern);
+    char *stripped = (char *)FcNameUnparse(pat);
     if (have_pt_size == FcResultMatch) {
-        sprintf(font_pattern + strlen(font_pattern), ":size=%f",
-                pt_size * scale);
+        strappf(&stripped, ":size=%.2f", pt_size * scale);
     }
     if (have_px_size == FcResultMatch) {
-        sprintf(font_pattern + strlen(font_pattern), ":pixelsize=%f",
-                px_size * scale);
+        strappf(&stripped, ":pixelsize=%.2f", px_size * scale);
     }
 
-    log_info(font_pattern);
-    free(stripped_pattern);
     FcPatternDestroy(pat);
 
-    const char *fonts[] = {font_pattern};
-    return fcft_from_name(1, fonts, NULL);
+    return stripped;
 }
 
-static void loop(struct wb *bar) {
-    enum { POLL_STDIN, POLL_WL };
+static void event_loop(struct wb *bar) {
+    enum { POLL_WL, POLL_STDIN };
     struct pollfd fds[] = {
         [POLL_WL] = {.fd = bar->wl->fd, .events = POLLIN},
         [POLL_STDIN] = {.fd = STDIN_FILENO, .events = POLLIN},
@@ -261,17 +258,21 @@ static void loop(struct wb *bar) {
             wl_display_dispatch(bar->wl->display);
         }
         if (fds[POLL_WL].revents & POLLHUP) {
-            break;
+            break; // if wayland disconnects then exit event loop
         }
 
         // stdin events
         if (fds[POLL_STDIN].revents & POLLIN) {
-            if (read_in_status(bar) != 0) {
+            if (!fgets(bar->status, sizeof(bar->status), stdin)) {
                 log_error("error while reading in status");
                 continue;
             }
+            bar->status[strcspn(bar->status, "\n")] = '\0';
 
-            schedule_frame(bar->wl);
+            struct wayland_monitor *mon;
+            wl_list_for_each(mon, &bar->wl->monitors, link) {
+                render(mon, draw_bar, bar);
+            }
         }
         if (fds[POLL_STDIN].revents & POLLHUP) {
             fds[POLL_STDIN].fd = -1; // disable polling of stdin
@@ -279,34 +280,37 @@ static void loop(struct wb *bar) {
     }
 }
 
-void wb_run(struct wb_config config) {
-    struct wb *bar = calloc(1, sizeof(*bar));
-    bar->config = config;
-    bar->wl = wayland_create(config.bottom, config.height, draw_bar, bar);
+static void on_scale(void *data, struct wayland_monitor *mon, int32_t scale) {
+    struct wb *bar = data;
 
-    // calculate monitor dpi
-    int32_t scale;
-    struct wayland_monitor *mon;
-    wl_list_for_each(mon, &bar->wl->monitors, link) {
-        scale = mon->scale;
+    // destroy previous font
+    fcft_destroy(bar->font);
+
+    // load new font
+    const char *fonts[] = {scale_font_pattern(bar->config.font, scale)};
+    bar->font = fcft_from_name(sizeof(fonts) / sizeof(fonts[0]), fonts, NULL);
+    free((char *)fonts[0]);
+    if (!bar->font) {
+        log_fatal("failed to load font '%s'", bar->config.font);
     }
+    log_info("loaded font: %s", bar->font->name);
 
+    // render with new font
+    render(mon, draw_bar, bar);
+}
+
+void wb_run(struct wb_config config) {
     fcft_init(FCFT_LOG_COLORIZE_AUTO, false, FCFT_LOG_CLASS_NONE);
 
-    // load font
-    bar->font = scaled_font(bar->config.font, scale);
-    if (!bar->font) {
-        log_fatal("failed to load font from name");
-    }
-    log_info("using font: %s", bar->font->name);
+    struct wb *bar = calloc(1, sizeof(*bar));
+    bar->config = config;
+    bar->wl = wayland_create(config.bottom, config.height, on_scale, bar);
 
-    loop(bar);
+    // the main event loop which handles input and wayland events
+    event_loop(bar);
 
     // cleanup
-    if (bar->wl) {
-        wayland_destroy(bar->wl);
-    }
-
+    wayland_destroy(bar->wl);
     fcft_destroy(bar->font);
     fcft_fini();
     free(bar);

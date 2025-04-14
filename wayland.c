@@ -1,13 +1,11 @@
 #include "wayland.h"
 
 #include <assert.h>
-#include <fcntl.h>
 #include <pixman.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client.h>
 
@@ -15,41 +13,6 @@
 #include "pool-buffer.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
-static void render(struct wayland_monitor *mon, draw_callback draw,
-                   void *draw_data) {
-    uint32_t width = mon->width * mon->scale;
-    uint32_t height = mon->height * mon->scale;
-
-    // check if buffer is out of date of output configuration
-    if (width != mon->buffer.width || height != mon->buffer.height) {
-        // destroy out of date buffer
-        pool_buffer_destroy(&mon->buffer);
-
-        // monitor new one
-        pool_buffer_create(&mon->buffer, mon->wl->shm, width, height);
-    }
-
-    assert(mon->output);
-    assert(mon->buffer.buffer);
-    assert(draw);
-
-    pixman_image_t *pix = pixman_image_create_bits_no_clear(
-        PIXMAN_a8r8g8b8, width, height, mon->buffer.data,
-        mon->buffer.width * 4);
-
-    struct render_ctx rctx = {
-        .pix = pix, .width = mon->buffer.width, .height = mon->buffer.height};
-
-    // call the callback associated with an output
-    draw(draw_data, &rctx);
-
-    pixman_image_unref(pix);
-
-    wl_surface_set_buffer_scale(mon->surface, mon->scale);
-    wl_surface_attach(mon->surface, mon->buffer.buffer, 0, 0);
-    wl_surface_damage(mon->surface, 0, 0, mon->width, mon->height);
-    wl_surface_commit(mon->surface);
-}
 /* layer surface listener */
 static void layer_surface_configure(void *data,
                                     struct zwlr_layer_surface_v1 *surface,
@@ -89,6 +52,30 @@ static void output_scale(void *data, struct wl_output *wl_output,
                          int32_t scale) {
     struct wayland_monitor *mon = data;
     mon->scale = scale;
+    log_info("monitor %s: scale %d", mon->name, mon->scale);
+
+    if (!mon->surface) {
+        mon->surface = wl_compositor_create_surface(mon->wl->compositor);
+
+        mon->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
+            mon->wl->layer_shell, mon->surface, mon->output,
+            ZWLR_LAYER_SHELL_V1_LAYER_TOP, "wb");
+        zwlr_layer_surface_v1_set_size(mon->layer_surface,
+                                       mon->wl->layer_surface_config.width,
+                                       mon->wl->layer_surface_config.height);
+        zwlr_layer_surface_v1_set_exclusive_zone(
+            mon->layer_surface, mon->wl->layer_surface_config.height);
+        zwlr_layer_surface_v1_set_anchor(mon->layer_surface,
+                                         mon->wl->layer_surface_config.anchor);
+        zwlr_layer_surface_v1_set_margin(mon->layer_surface, 0, 0, 0, 0);
+        zwlr_layer_surface_v1_add_listener(mon->layer_surface,
+                                           &layer_surface_listener, mon);
+
+        wl_surface_commit(mon->surface);
+        wl_display_roundtrip(mon->wl->display);
+    }
+
+    mon->wl->user_scale_callback(mon->wl->user_data, mon, scale);
 }
 
 static void output_name(void *data, struct wl_output *wl_output,
@@ -104,13 +91,7 @@ static void output_description(void *data, struct wl_output *wl_output,
 }
 
 static void output_done(void *data, struct wl_output *wl_output) {
-    struct wayland_monitor *mon = data;
-
-    log_info("monitor %s configured, scale %d", mon->name, mon->scale);
-
-    if (mon->surface) {
-        render(mon, mon->wl->draw, mon->wl->draw_data);
-    }
+    // not needed
 }
 
 static const struct wl_output_listener output_listener = {
@@ -157,23 +138,25 @@ static const struct wl_registry_listener wl_registry_listener = {
     .global_remove = registry_global_remove,
 };
 
-void schedule_frame(struct wayland *wl) {
-    struct wayland_monitor *mon;
-    wl_list_for_each(mon, &wl->monitors, link) {
-        render(mon, wl->draw, wl->draw_data);
-    }
-}
-
-struct wayland *wayland_create(bool bottom, uint32_t height, draw_callback draw,
-                               void *draw_data) {
+struct wayland *wayland_create(bool bottom, uint32_t height,
+                               scale_callback_t user_scale_callback,
+                               void *user_data) {
     struct wayland *wl = calloc(1, sizeof(*wl));
     wl_list_init(&wl->monitors);
-    wl->draw = draw;
-    wl->draw_data = draw_data;
 
+    // set user configuration
+    wl->user_scale_callback = user_scale_callback;
+    wl->user_data = user_data;
+    wl->layer_surface_config.width = 0;
+    wl->layer_surface_config.height = height;
+    wl->layer_surface_config.anchor =
+        (bottom ? ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
+                : ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) |
+        ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
+
+    // bind wayland globals
     wl->display = wl_display_connect(NULL);
     wl->fd = wl_display_get_fd(wl->display);
-
     wl->registry = wl_display_get_registry(wl->display);
     wl_registry_add_listener(wl->registry, &wl_registry_listener, wl);
     wl_display_roundtrip(wl->display);
@@ -184,69 +167,67 @@ struct wayland *wayland_create(bool bottom, uint32_t height, draw_callback draw,
     assert(wl->shm);
     assert(!wl_list_empty(&wl->monitors));
 
-    // trigger the listeners that were added when binding globals
+    // roundtrip so listeners added during the registry events are handled
     wl_display_roundtrip(wl->display);
-
-    struct wayland_monitor *mon;
-    wl_list_for_each(mon, &wl->monitors, link) {
-        // every output has one surface associated with it
-        mon->surface = wl_compositor_create_surface(wl->compositor);
-
-        mon->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-            wl->layer_shell, mon->surface, mon->output,
-            ZWLR_LAYER_SHELL_V1_LAYER_TOP, "wb");
-        zwlr_layer_surface_v1_set_size(mon->layer_surface, 0, height);
-        zwlr_layer_surface_v1_set_exclusive_zone(mon->layer_surface, height);
-        zwlr_layer_surface_v1_set_anchor(
-            mon->layer_surface, (bottom ? ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
-                                        : ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) |
-                                    ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
-                                    ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
-        zwlr_layer_surface_v1_set_margin(mon->layer_surface, 0, 0, 0, 0);
-        zwlr_layer_surface_v1_set_keyboard_interactivity(
-            mon->layer_surface,
-            ZWLR_LAYER_SURFACE_V1_KEYBOARD_INTERACTIVITY_NONE);
-        zwlr_layer_surface_v1_add_listener(mon->layer_surface,
-                                           &layer_surface_listener, mon);
-
-        wl_surface_commit(mon->surface);
-    }
-
-    wl_display_roundtrip(wl->display);
-
-    // render after a roundtrip
-    schedule_frame(wl);
 
     log_info("wayland initialized");
     return wl;
 }
 
-void wayland_destroy(struct wayland *ctx) {
-    // destroy all output ctx's
-    struct wayland_monitor *output, *tmp;
-    wl_list_for_each_safe(output, tmp, &ctx->monitors, link) {
-        wl_list_remove(&output->link);
+void wayland_destroy(struct wayland *wl) {
+    struct wayland_monitor *mon, *tmp;
+    wl_list_for_each_safe(mon, tmp, &wl->monitors, link) {
+        wl_list_remove(&mon->link);
 
-        wl_output_release(output->output);
-        wl_surface_destroy(output->surface);
-        zwlr_layer_surface_v1_destroy(output->layer_surface);
-        if (output->buffer.buffer) {
-            wl_buffer_destroy(output->buffer.buffer);
+        wl_output_release(mon->output);
+        wl_surface_destroy(mon->surface);
+        zwlr_layer_surface_v1_destroy(mon->layer_surface);
+        if (mon->buffer.buffer) {
+            wl_buffer_destroy(mon->buffer.buffer);
         }
-        free(output->name);
-        free(output);
+        free(mon->name);
+        free(mon);
     }
 
     // globals
-    zwlr_layer_shell_v1_destroy(ctx->layer_shell);
-    wl_registry_destroy(ctx->registry);
-    wl_shm_destroy(ctx->shm);
-    wl_compositor_destroy(ctx->compositor);
+    zwlr_layer_shell_v1_destroy(wl->layer_shell);
+    wl_registry_destroy(wl->registry);
+    wl_shm_destroy(wl->shm);
+    wl_compositor_destroy(wl->compositor);
 
-    wl_display_flush(ctx->display);
-    wl_display_disconnect(ctx->display);
+    wl_display_flush(wl->display);
+    wl_display_disconnect(wl->display);
 
-    free(ctx);
+    free(wl);
 
     log_info("wayland destroyed");
+}
+
+void render(struct wayland_monitor *mon, draw_callback_t draw,
+            void *draw_data) {
+    uint32_t width = mon->width * mon->scale;
+    uint32_t height = mon->height * mon->scale;
+
+    // check if buffer is out of date of output configuration
+    if (width != mon->buffer.width || height != mon->buffer.height) {
+        pool_buffer_destroy(&mon->buffer);
+        pool_buffer_create(&mon->buffer, mon->wl->shm, width, height);
+    }
+
+    assert(mon->buffer.buffer);
+
+    pixman_image_t *pix = pixman_image_create_bits_no_clear(
+        PIXMAN_a8r8g8b8, width, height, mon->buffer.data, width * 4);
+
+    struct render_ctx rctx = {.pix = pix, .width = width, .height = height};
+
+    // call the callback associated with an output
+    draw(draw_data, &rctx);
+
+    pixman_image_unref(pix);
+
+    wl_surface_set_buffer_scale(mon->surface, mon->scale);
+    wl_surface_attach(mon->surface, mon->buffer.buffer, 0, 0);
+    wl_surface_damage(mon->surface, 0, 0, mon->width, mon->height);
+    wl_surface_commit(mon->surface);
 }

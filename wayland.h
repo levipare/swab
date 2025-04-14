@@ -29,7 +29,8 @@ struct wayland_monitor {
     struct wl_list link;
 };
 
-typedef void (*draw_callback)(void *, struct render_ctx *);
+typedef void (*scale_callback_t)(void *data, struct wayland_monitor *mon,
+                                 int32_t scale);
 
 struct wayland {
     int fd;
@@ -38,17 +39,23 @@ struct wayland {
     struct wl_shm *shm;
     struct wl_compositor *compositor;
     struct zwlr_layer_shell_v1 *layer_shell;
-
     struct wl_list monitors;
 
-    draw_callback draw;
-    void *draw_data;
+    struct {
+        uint32_t width, height;
+        enum zwlr_layer_surface_v1_anchor anchor;
+    } layer_surface_config;
+    void *user_data;
+    scale_callback_t user_scale_callback;
 };
 
-void schedule_frame(struct wayland *ctx);
+typedef void (*draw_callback_t)(void *, struct render_ctx *);
 
-struct wayland *wayland_create(bool bottom, uint32_t height, draw_callback draw,
-                               void *draw_data);
+void render(struct wayland_monitor *mon, draw_callback_t draw, void *draw_data);
+
+struct wayland *wayland_create(bool bottom, uint32_t height,
+                               scale_callback_t user_scale_callback,
+                               void *user_data);
 
 void wayland_destroy(struct wayland *ctx);
 
