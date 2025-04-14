@@ -3,6 +3,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <pixman.h>
 #include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
@@ -67,11 +68,17 @@ void pool_buffer_create(struct pool_buffer *pb, struct wl_shm *shm,
                                            WL_SHM_FORMAT_ARGB8888);
     wl_shm_pool_destroy(pool);
     close(fd);
+
+    pb->pix = pixman_image_create_bits_no_clear(PIXMAN_a8r8g8b8, width, height,
+                                                pb->data, stride);
 }
 
 void pool_buffer_destroy(struct pool_buffer *buffer) {
     if (buffer->buffer) {
         wl_buffer_destroy(buffer->buffer);
+    }
+    if (buffer->pix) {
+        pixman_image_unref(buffer->pix);
     }
     if (buffer->data) {
         munmap(buffer->data, buffer->size);

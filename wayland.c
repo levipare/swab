@@ -216,15 +216,11 @@ void render(struct wayland_monitor *mon, draw_callback_t draw,
 
     assert(mon->buffer.buffer);
 
-    pixman_image_t *pix = pixman_image_create_bits_no_clear(
-        PIXMAN_a8r8g8b8, width, height, mon->buffer.data, width * 4);
-
-    struct render_ctx rctx = {.pix = pix, .width = width, .height = height};
+    struct render_ctx rctx = {
+        .pix = mon->buffer.pix, .width = width, .height = height};
 
     // call the callback associated with an output
     draw(draw_data, &rctx);
-
-    pixman_image_unref(pix);
 
     wl_surface_set_buffer_scale(mon->surface, mon->scale);
     wl_surface_attach(mon->surface, mon->buffer.buffer, 0, 0);

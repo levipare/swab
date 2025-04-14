@@ -1,6 +1,7 @@
 #ifndef POOL_BUFFER_H
 #define POOL_BUFFER_H
 
+#include <pixman.h>
 #include <wayland-client.h>
 
 struct pool_buffer {
@@ -8,6 +9,7 @@ struct pool_buffer {
     uint32_t width, height;
     size_t size;
     void *data;
+    pixman_image_t *pix;
 };
 
 void pool_buffer_create(struct pool_buffer *pb, struct wl_shm *shm,
