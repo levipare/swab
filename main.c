@@ -53,10 +53,7 @@ int main(int argc, char *argv[]) {
                               &option_index)) != -1) {
         switch (opt) {
         case 'H':
-            if ((config.height = atoi(optarg)) <= 0) {
-                printf("%s: -y: height must be greater than 0\n", argv[0]);
-                return EXIT_FAILURE;
-            }
+            config.height = atoi(optarg);
             break;
         case 'f':
             strncpy(config.font, optarg, sizeof(config.font));
