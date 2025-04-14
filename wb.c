@@ -275,7 +275,7 @@ static void event_loop(struct wb *bar) {
             }
         }
         if (fds[POLL_STDIN].revents & POLLHUP) {
-            fds[POLL_STDIN].fd = -1; // disable polling of stdin
+            break;
         }
     }
 }
