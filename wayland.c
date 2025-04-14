@@ -182,9 +182,7 @@ void wayland_destroy(struct wayland *wl) {
         wl_output_release(mon->output);
         wl_surface_destroy(mon->surface);
         zwlr_layer_surface_v1_destroy(mon->layer_surface);
-        if (mon->buffer.buffer) {
-            wl_buffer_destroy(mon->buffer.buffer);
-        }
+        pool_buffer_destroy(&mon->buffer);
         free(mon->name);
         free(mon);
     }
