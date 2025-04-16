@@ -55,19 +55,17 @@ static void output_scale(void *data, struct wl_output *wl_output,
     log_info("monitor %s: scale %d", mon->name, mon->scale);
 
     if (!mon->surface) {
+        struct wayland_layer_surface_config conf = mon->wl->ls_config;
         mon->surface = wl_compositor_create_surface(mon->wl->compositor);
 
         mon->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
-            mon->wl->layer_shell, mon->surface, mon->output,
-            ZWLR_LAYER_SHELL_V1_LAYER_TOP, "wb");
-        zwlr_layer_surface_v1_set_size(mon->layer_surface,
-                                       mon->wl->layer_surface_config.width,
-                                       mon->wl->layer_surface_config.height);
-        zwlr_layer_surface_v1_set_exclusive_zone(
-            mon->layer_surface, mon->wl->layer_surface_config.height);
-        zwlr_layer_surface_v1_set_anchor(mon->layer_surface,
-                                         mon->wl->layer_surface_config.anchor);
-        zwlr_layer_surface_v1_set_margin(mon->layer_surface, 0, 0, 0, 0);
+            mon->wl->layer_shell, mon->surface, mon->output, conf.layer, "wb");
+        zwlr_layer_surface_v1_set_size(mon->layer_surface, conf.width,
+                                       conf.height);
+        zwlr_layer_surface_v1_set_exclusive_zone(mon->layer_surface, conf.zone);
+        zwlr_layer_surface_v1_set_anchor(mon->layer_surface, conf.anchor);
+        zwlr_layer_surface_v1_set_margin(mon->layer_surface, conf.top,
+                                         conf.right, conf.bottom, conf.left);
         zwlr_layer_surface_v1_add_listener(mon->layer_surface,
                                            &layer_surface_listener, mon);
 
@@ -138,21 +136,16 @@ static const struct wl_registry_listener wl_registry_listener = {
     .global_remove = registry_global_remove,
 };
 
-struct wayland *wayland_create(bool bottom, uint32_t height,
+struct wayland *wayland_create(struct wayland_layer_surface_config ls_config,
                                scale_callback_t user_scale_callback,
                                void *user_data) {
     struct wayland *wl = calloc(1, sizeof(*wl));
     wl_list_init(&wl->monitors);
 
     // set user configuration
+    wl->ls_config = ls_config;
     wl->user_scale_callback = user_scale_callback;
     wl->user_data = user_data;
-    wl->layer_surface_config.width = 0;
-    wl->layer_surface_config.height = height;
-    wl->layer_surface_config.anchor =
-        (bottom ? ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
-                : ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) |
-        ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT;
 
     // bind wayland globals
     wl->display = wl_display_connect(NULL);

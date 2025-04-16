@@ -15,6 +15,7 @@
 
 #include "log.h"
 #include "wayland.h"
+#include "wlr-layer-shell-unstable-v1-client-protocol.h"
 
 #define ALIGNMENT_SEP '\x1f'
 
@@ -304,7 +305,15 @@ void wb_run(struct wb_config config) {
 
     struct wb *bar = calloc(1, sizeof(*bar));
     bar->config = config;
-    bar->wl = wayland_create(config.bottom, config.height, on_scale, bar);
+    struct wayland_layer_surface_config ls_config = {
+        .layer = ZWLR_LAYER_SHELL_V1_LAYER_TOP,
+        .height = config.height,
+        .zone = config.height,
+        .anchor = (config.bottom ? ZWLR_LAYER_SURFACE_V1_ANCHOR_BOTTOM
+                                 : ZWLR_LAYER_SURFACE_V1_ANCHOR_TOP) |
+                  ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT |
+                  ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT};
+    bar->wl = wayland_create(ls_config, on_scale, bar);
 
     // the main event loop which handles input and wayland events
     event_loop(bar);
