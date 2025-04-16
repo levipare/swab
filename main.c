@@ -63,10 +63,10 @@ int main(int argc, char *argv[]) {
             config.bottom = true;
             break;
         case 'F':
-            config.fg_color = strtoul(optarg, NULL, 0);
+            config.fg_color = strtoul(optarg, NULL, 16);
             break;
         case 'B':
-            config.bg_color = strtoul(optarg, NULL, 0);
+            config.bg_color = strtoul(optarg, NULL, 16);
             break;
         case 'h':
             print_usage(argv[0]);
