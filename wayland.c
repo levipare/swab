@@ -1,5 +1,4 @@
 #include "wayland.h"
-
 #include <assert.h>
 #include <pixman.h>
 #include <stdbool.h>
@@ -12,6 +11,8 @@
 #include "log.h"
 #include "pool-buffer.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+
+void noop() {}
 
 /* layer surface listener */
 static void layer_surface_configure(void *data,
@@ -35,24 +36,10 @@ struct zwlr_layer_surface_v1_listener layer_surface_listener = {
 };
 
 /* wl_output listener */
-static void output_geometry(void *data, struct wl_output *wl_output, int32_t x,
-                            int32_t y, int32_t physical_width,
-                            int32_t physical_height, int32_t subpixel,
-                            const char *make, const char *model,
-                            int32_t transform) {
-    // not needed
-}
-
-static void output_mode(void *data, struct wl_output *wl_output, uint32_t flags,
-                        int32_t width, int32_t height, int32_t refresh) {
-    // not needed
-}
-
 static void output_scale(void *data, struct wl_output *wl_output,
                          int32_t scale) {
     struct wayland_monitor *mon = data;
     mon->scale = scale;
-    log_info("monitor %s: scale %d", mon->name, mon->scale);
 
     if (!mon->surface) {
         struct wayland_layer_surface_config conf = mon->wl->ls_config;
@@ -83,21 +70,17 @@ static void output_name(void *data, struct wl_output *wl_output,
     mon->name = strdup(name);
 }
 
-static void output_description(void *data, struct wl_output *wl_output,
-                               const char *desc) {
-    // not needed
-}
-
 static void output_done(void *data, struct wl_output *wl_output) {
-    // not needed
+    struct wayland_monitor *mon = data;
+    log_info("monitor %s: scale %d", mon->name, mon->scale);
 }
 
 static const struct wl_output_listener output_listener = {
-    .geometry = output_geometry,
-    .mode = output_mode,
+    .geometry = noop,
+    .mode = noop,
     .scale = output_scale,
     .name = output_name,
-    .description = output_description,
+    .description = noop,
     .done = output_done,
 };
 
@@ -128,8 +111,7 @@ static void registry_global(void *data, struct wl_registry *wl_registry,
 }
 
 static void registry_global_remove(void *data, struct wl_registry *wl_registry,
-                                   uint32_t name) {
-}
+                                   uint32_t name) {}
 
 static const struct wl_registry_listener wl_registry_listener = {
     .global = registry_global,
