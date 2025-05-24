@@ -1,6 +1,6 @@
-# wb
+# swab
 
-**wb** is a simple status bar for wayland compositors that implement the [layer shell protocol](https://wayland.app/protocols/wlr-layer-shell-unstable-v1#compositor-support).
+**swab** is a simple status bar for wayland compositors that implement the [layer shell protocol](https://wayland.app/protocols/wlr-layer-shell-unstable-v1#compositor-support).
 The status is read from stdin and is expected to be newline terminated and utf-8 encoded.
 
 ![image](https://github.com/user-attachments/assets/8f08ad85-897e-4ef7-b9bd-516c0f170de7)
@@ -14,22 +14,22 @@ The status is read from stdin and is expected to be newline terminated and utf-8
 
 ## Building
 ```sh
-git clone https://github.com/levipare/wb
-cd wb
+git clone https://github.com/levipare/swab
+cd swab
 make
 ```
 
 ## Usage
-Pipe your status generating utility into **wb**.
+Pipe your status generating utility into **swab**.
 ```sh
-while date; do sleep 1; done | wb
+while date; do sleep 1; done | swab
 ```
 
 ## Configuration
-**wb** is configured via command flags. Run `wb --help` to view the options.
+**swab** is configured via command flags. Run `swab --help` to view the options.
 > View `man fonts-conf` to see the available font config attributes.
 
-The following sets the font (in pt), foreground color (ARGB), and background color (ARGB).
+The following sets the font (in pt), foreground color (RGBA), and background color (RGBA).
 ```sh
-wb -f TerminessNerdFont:size=12 -F 0xFFCCCCCC -B 0xFF005555
+swab -f TerminessNerdFont:size=12 -F 0xccccccff -B 0x005555ff
 ```
