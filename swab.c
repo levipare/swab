@@ -475,7 +475,7 @@ int main(int argc, char *argv[]) {
             usage(argv[0]);
             return EXIT_SUCCESS;
         default: {
-            die("Try '%s --help' for more information.", argv[0]);
+            die("Try '%s -h' for more information.", argv[0]);
         }
         }
     }

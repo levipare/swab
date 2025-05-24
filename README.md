@@ -26,7 +26,7 @@ while date; do sleep 1; done | swab
 ```
 
 ## Configuration
-**swab** is configured via command flags. Run `swab --help` to view the options.
+**swab** is configured via command flags. Run `swab -h` to view the options.
 > View `man fonts-conf` to see the available font config attributes.
 
 The following sets the font (in pt), foreground color (RGBA), and background color (RGBA).
