@@ -213,45 +213,56 @@ static void draw_bar(struct monitor *mon) {
     struct buffer *buffer =
         buffer_create(mon->surface_width * mon->scale, mon->surface_height * mon->scale);
 
-    // fill background color
-    pixman_color_t bg_color = rgba_to_pixman(bg);
+    const pixman_color_t fg_color = rgba_to_pixman(fg);
+    pixman_image_t *fg_pix = pixman_image_create_solid_fill(&fg_color);
+    const pixman_color_t bg_color = rgba_to_pixman(bg);
+
     pixman_image_fill_rectangles(PIXMAN_OP_SRC, buffer->pix, &bg_color, 1,
                                  &(pixman_rectangle16_t){0, 0, buffer->width, buffer->height});
 
-    uint32_t *str;
-    size_t len = utf8_to_utf32(input, &str);
-    struct fcft_text_run *text_run =
-        fcft_rasterize_text_run_utf32(mon->font, len, str, FCFT_SUBPIXEL_NONE);
+    int i = 0;
+    for (char *text = strtok(input, "^"); text; text = strtok(NULL, "^")) {
+        uint32_t *str;
+        size_t len = utf8_to_utf32(text, &str);
+        struct fcft_text_run *text_run =
+            fcft_rasterize_text_run_utf32(mon->font, len, str, FCFT_SUBPIXEL_NONE);
 
-    // make image used for fg color of text
-    pixman_color_t fg_color = rgba_to_pixman(fg);
-    pixman_image_t *fg_pix = pixman_image_create_solid_fill(&fg_color);
-
-    int32_t x = 0;
-    int32_t y = buffer->height / 2;
-    y += (mon->font->ascent + mon->font->descent) / 2.0 -
-         (mon->font->descent > 0 ? mon->font->descent : 0);
-
-    for (int i = 0; i < text_run->count; ++i) {
-        const struct fcft_glyph *g = text_run->glyphs[i];
-
-        // pixman_color_t rev_color = rgba_to_pixman(0xff00ff33);
-        // pixman_image_fill_rectangles(PIXMAN_OP_SRC, buffer->pix, &rev_color, 1,
-        //                              &(pixman_rectangle16_t){x, 0, g->advance.x,
-        //                              buffer->height});
-
-        if (g->is_color_glyph) {
-            pixman_image_composite32(PIXMAN_OP_OVER, g->pix, NULL, buffer->pix, 0, 0, 0, 0,
-                                     x + g->x, y - g->y, g->width, g->height);
-        } else {
-            pixman_image_composite32(PIXMAN_OP_OVER, fg_pix, g->pix, buffer->pix, 0, 0, 0, 0,
-                                     x + g->x, y - g->y, g->width, g->height);
+        int32_t text_width = 0;
+        for (int i = 0; i < text_run->count; ++i) {
+            text_width += text_run->glyphs[i]->advance.x;
         }
 
-        x += g->advance.x;
+        int32_t x = 0;
+        switch (i) {
+        case 1:
+            x = (buffer->width - text_width) / 2;
+            break;
+        case 2:
+            x = buffer->width - text_width;
+            break;
+        }
+
+        int32_t y = buffer->height / 2;
+        y += (mon->font->ascent + mon->font->descent) / 2.0 -
+             (mon->font->descent > 0 ? mon->font->descent : 0);
+
+        for (int i = 0; i < text_run->count; ++i) {
+            const struct fcft_glyph *g = text_run->glyphs[i];
+
+            if (g->is_color_glyph) {
+                pixman_image_composite32(PIXMAN_OP_OVER, g->pix, NULL, buffer->pix, 0, 0, 0, 0,
+                                         x + g->x, y - g->y, g->width, g->height);
+            } else {
+                pixman_image_composite32(PIXMAN_OP_OVER, fg_pix, g->pix, buffer->pix, 0, 0, 0, 0,
+                                         x + g->x, y - g->y, g->width, g->height);
+            }
+
+            x += g->advance.x;
+        }
+        free(str);
+        fcft_text_run_destroy(text_run);
+        i++;
     }
-    free(str);
-    fcft_text_run_destroy(text_run);
 
     wl_surface_set_buffer_scale(mon->surface, mon->scale);
     wl_surface_attach(mon->surface, buffer->wlbuf, 0, 0);
@@ -442,6 +453,7 @@ void usage(const char *prog_name) {
     "Options:\n"
     "  -b       anchor bar to bottom of display\n"
     "  -f FONT  set font description (monospace:size=10)\n"
+    "  -l FONT  set line height (1.0)\n"
     "  -F HEX   set foreground color in RGBA (0xbbbbbbff)\n"
     "  -B HEX   set background color in RGBA (0x0c0c0cff)\n"
     "  -v       show version info\n"
