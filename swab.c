@@ -220,8 +220,11 @@ static void draw_bar(struct monitor *mon) {
     pixman_image_fill_rectangles(PIXMAN_OP_SRC, buffer->pix, &bg_color, 1,
                                  &(pixman_rectangle16_t){0, 0, buffer->width, buffer->height});
 
+    char *rest = input;
+    char *text;
     int i = 0;
-    for (char *text = strtok(input, "^"); text; text = strtok(NULL, "^")) {
+    while ((text = strsep(&rest, "^")) != NULL) {
+        puts(text);
         uint32_t *str;
         size_t len = utf8_to_utf32(text, &str);
         struct fcft_text_run *text_run =
@@ -268,6 +271,7 @@ static void draw_bar(struct monitor *mon) {
     wl_surface_attach(mon->surface, buffer->wlbuf, 0, 0);
     wl_surface_damage_buffer(mon->surface, 0, 0, buffer->width, buffer->height);
     wl_surface_commit(mon->surface);
+    puts("");
 }
 
 static void draw() {
