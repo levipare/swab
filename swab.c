@@ -118,9 +118,10 @@ static int allocate_shm_file(size_t size) {
 
 static void buffer_release(void *data, struct wl_buffer *wlbuf) {
     struct buffer *buf = data;
-    wl_buffer_destroy(wlbuf);
+    wl_buffer_destroy(buf->wlbuf);
     pixman_image_unref(buf->pix);
     munmap(buf->data, buf->size);
+    free(buf);
 }
 
 static const struct wl_buffer_listener buffer_listener = {
@@ -250,6 +251,7 @@ static void draw_bar(struct monitor *mon) {
         x += g->advance.x;
     }
     free(str);
+    fcft_text_run_destroy(text_run);
 
     wl_surface_set_buffer_scale(mon->surface, mon->scale);
     wl_surface_attach(mon->surface, buffer->wlbuf, 0, 0);
