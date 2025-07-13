@@ -224,7 +224,6 @@ static void draw_bar(struct monitor *mon) {
     char *text;
     int i = 0;
     while ((text = strsep(&rest, "^")) != NULL) {
-        puts(text);
         uint32_t *str;
         size_t len = utf8_to_utf32(text, &str);
         struct fcft_text_run *text_run =
@@ -271,7 +270,6 @@ static void draw_bar(struct monitor *mon) {
     wl_surface_attach(mon->surface, buffer->wlbuf, 0, 0);
     wl_surface_damage_buffer(mon->surface, 0, 0, buffer->width, buffer->height);
     wl_surface_commit(mon->surface);
-    puts("");
 }
 
 static void draw() {
