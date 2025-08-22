@@ -265,6 +265,7 @@ static void draw_bar(struct monitor *mon) {
         fcft_text_run_destroy(text_run);
         i++;
     }
+    pixman_image_unref(fg_pix);
 
     wl_surface_set_buffer_scale(mon->surface, mon->scale);
     wl_surface_attach(mon->surface, buffer->wlbuf, 0, 0);
