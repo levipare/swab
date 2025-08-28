@@ -433,6 +433,7 @@ void cleanup() {
     struct monitor *mon, *tmp;
     wl_list_for_each_safe(mon, tmp, &monitors, link) {
         wl_list_remove(&mon->link);
+        fcft_destroy(mon->font);
         wl_output_release(mon->output);
         wl_surface_destroy(mon->surface);
         zwlr_layer_surface_v1_destroy(mon->layer_surface);
@@ -447,6 +448,7 @@ void cleanup() {
     wl_display_disconnect(display);
 
     fcft_fini();
+    free(font);
 }
 
 void usage(const char *prog_name) {
