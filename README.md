@@ -5,6 +5,8 @@ The status is read from stdin and is expected to be newline terminated and utf-8
 
 ![image](https://github.com/user-attachments/assets/8f08ad85-897e-4ef7-b9bd-516c0f170de7)
 
+> Works well with [muxst](https://github.com/levipare/muxst)
+
 ## Dependencies
 - wayland
 - pixman
