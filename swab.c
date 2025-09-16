@@ -3,6 +3,7 @@
 #include <fcft/fcft.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <locale.h>
 #include <pixman.h>
 #include <poll.h>
 #include <stdarg.h>
@@ -14,6 +15,7 @@
 #include <sys/mman.h>
 #include <sys/poll.h>
 #include <time.h>
+#include <uchar.h>
 #include <unistd.h>
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
@@ -167,46 +169,41 @@ static inline pixman_color_t rgba_to_pixman(uint32_t c) {
     };
 }
 
-static size_t utf8_to_utf32(const char *utf8, uint32_t **utf32_out) {
-    size_t len = 0;
-    const unsigned char *s = (const unsigned char *)utf8;
-    size_t capacity = 16;
-    uint32_t *result = malloc(capacity * sizeof(uint32_t));
+static size_t mbsntoc32(char32_t *dst, const char *src, size_t nms, size_t len) {
+    mbstate_t ps = {0};
 
-    while (*s) {
-        uint32_t codepoint = 0;
-        size_t bytes = 0;
+    char32_t *out = dst;
+    const char *in = src;
 
-        if (s[0] < 0x80) {
-            codepoint = s[0];
-            bytes = 1;
-        } else if ((s[0] & 0xE0) == 0xC0) {
-            codepoint = (s[0] & 0x1F) << 6 | (s[1] & 0x3F);
-            bytes = 2;
-        } else if ((s[0] & 0xF0) == 0xE0) {
-            codepoint = (s[0] & 0x0F) << 12 | (s[1] & 0x3F) << 6 | (s[2] & 0x3F);
-            bytes = 3;
-        } else if ((s[0] & 0xF8) == 0xF0) {
-            codepoint =
-                (s[0] & 0x07) << 18 | (s[1] & 0x3F) << 12 | (s[2] & 0x3F) << 6 | (s[3] & 0x3F);
-            bytes = 4;
-        } else {
-            // invalid byte sequence
-            bytes = 1;
-            codepoint = 0xFFFD; // unicode replacement character
+    size_t consumed = 0;
+    size_t chars = 0;
+    size_t rc;
+
+    while ((out == NULL || chars < len) && consumed < nms &&
+           (rc = mbrtoc32(out, in, nms - consumed, &ps)) != 0) {
+        switch (rc) {
+        case 0:
+            goto done;
+
+        case (size_t)-1:
+        case (size_t)-2:
+        case (size_t)-3:
+            goto err;
         }
 
-        if (len + 1 >= capacity) {
-            capacity *= 2;
-            result = realloc(result, capacity * sizeof(uint32_t));
-        }
+        in += rc;
+        consumed += rc;
+        chars++;
 
-        result[len++] = codepoint;
-        s += bytes;
+        if (out != NULL)
+            out++;
     }
 
-    *utf32_out = result;
-    return len;
+done:
+    return chars;
+
+err:
+    return (size_t)-1;
 }
 
 static void draw_bar(struct monitor *mon) {
@@ -224,10 +221,16 @@ static void draw_bar(struct monitor *mon) {
     char *text;
     int i = 0;
     while ((text = strsep(&rest, "^")) != NULL) {
-        uint32_t *str;
-        size_t len = utf8_to_utf32(text, &str);
+        size_t wlen = mbsntoc32(NULL, text, strlen(text), 0);
+        if (wlen == -1) {
+            die("mbsntoc32():");
+        }
+        char32_t *text32 = malloc((wlen + 1) * sizeof(*text32));
+        mbsntoc32(text32, text, strlen(text), wlen);
+        text32[wlen] = 0;
+
         struct fcft_text_run *text_run =
-            fcft_rasterize_text_run_utf32(mon->font, len, str, FCFT_SUBPIXEL_NONE);
+            fcft_rasterize_text_run_utf32(mon->font, wlen, text32, FCFT_SUBPIXEL_NONE);
 
         int32_t text_width = 0;
         for (int i = 0; i < text_run->count; ++i) {
@@ -261,7 +264,7 @@ static void draw_bar(struct monitor *mon) {
 
             x += g->advance.x;
         }
-        free(str);
+        free(text32);
         fcft_text_run_destroy(text_run);
         i++;
     }
@@ -469,6 +472,8 @@ void usage(const char *prog_name) {
 }
 
 int main(int argc, char *argv[]) {
+    setlocale(LC_CTYPE, "");
+
     int opt;
     while ((opt = getopt(argc, argv, "f:l:F:B:bvh")) != -1) {
         switch (opt) {
