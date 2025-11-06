@@ -412,10 +412,8 @@ void run() {
 
         // wayland events
         if (fds[POLL_WL].revents & POLLIN) {
-            wl_display_dispatch(display);
-        }
-        if (fds[POLL_WL].revents & POLLHUP) {
-            break;
+            if (wl_display_dispatch(display) == -1)
+                break;
         }
 
         // stdin events
