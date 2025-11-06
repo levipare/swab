@@ -13,14 +13,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
-#include <sys/poll.h>
 #include <time.h>
 #include <uchar.h>
 #include <unistd.h>
-#include <wayland-client-core.h>
-#include <wayland-client-protocol.h>
 #include <wayland-client.h>
-#include <wayland-util.h>
 
 #include "wlr-layer-shell-unstable-v1-protocol.h"
 
