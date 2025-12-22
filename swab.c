@@ -297,7 +297,7 @@ static void draw_bar(struct monitor *mon) {
     wl_surface_commit(mon->surface);
 }
 
-static void draw() {
+static void draw(void) {
     struct monitor *mon;
     wl_list_for_each(mon, &monitors, link) draw_bar(mon);
 }
@@ -398,7 +398,7 @@ static const struct wl_registry_listener wl_registry_listener = {
     .global = registry_global,
 };
 
-void setup() {
+void setup(void) {
     fcft_init(FCFT_LOG_COLORIZE_AUTO, false, FCFT_LOG_CLASS_NONE);
 
     if (!(display = wl_display_connect(NULL))) {
@@ -418,7 +418,7 @@ void setup() {
     wl_display_roundtrip(display);
 }
 
-void run() {
+void run(void) {
     enum { POLL_WL, POLL_STDIN };
     struct pollfd fds[] = {
         [POLL_WL] = {.fd = wl_display_get_fd(display), .events = POLLIN},
@@ -469,7 +469,7 @@ void run() {
     }
 }
 
-void cleanup() {
+void cleanup(void) {
     struct monitor *mon, *tmp;
     wl_list_for_each_safe(mon, tmp, &monitors, link) {
         fcft_destroy(mon->font);

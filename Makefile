@@ -11,7 +11,7 @@ INCS != $(PKG_CONFIG) --cflags $(PKGS)
 LIBS != $(PKG_CONFIG) --libs $(PKGS)
 
 CPPFLAGS += -DVERSION=\"$(VERSION)\" -D_DEFAULT_SOURCE
-CFLAGS += -Wall -Wextra -Wpedantic -Werror $(INCS)
+CFLAGS += -Wall -Wextra -Werror $(INCS)
 LDLIBS = $(LIBS)
 
 WAYLAND_SCANNER   != $(PKG_CONFIG) --variable=wayland_scanner wayland-scanner
