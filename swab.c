@@ -1,10 +1,8 @@
 #include <assert.h>
 #include <errno.h>
-#include <fcft/fcft.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <locale.h>
-#include <pixman.h>
 #include <poll.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -16,6 +14,9 @@
 #include <time.h>
 #include <uchar.h>
 #include <unistd.h>
+
+#include <fcft/fcft.h>
+#include <pixman.h>
 #include <wayland-client.h>
 
 #include "wlr-layer-shell-unstable-v1-protocol.h"
@@ -31,13 +32,11 @@ struct monitor {
     struct wl_output *output;
     char *name;
     int32_t scale;
-
     struct wl_surface *surface;
     struct zwlr_layer_surface_v1 *layer_surface;
     uint32_t surface_width, surface_height;
-
+    struct buffer buf;
     struct fcft_font *font;
-
     struct wl_list link;
 };
 
@@ -53,6 +52,7 @@ static char input[1024];
 static char *font = "monospace:size=10";
 static uint32_t fg = 0xbbbbbbff;
 static uint32_t bg = 0x0c0c0cff;
+static int32_t persist_secs = -1; // -1: not set, 0: indefinitely
 static bool topbar = true;
 static double lineheight = 1.0;
 
@@ -78,7 +78,7 @@ static void randname(char *buf) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     long r = ts.tv_nsec;
-    for (int i = 0; i < 6; ++i) {
+    for (size_t i = 0; i < 6; ++i) {
         buf[i] = 'A' + (r & 15) + (r & 16) * 2;
         r >>= 5;
     }
@@ -114,46 +114,10 @@ static int allocate_shm_file(size_t size) {
     return fd;
 }
 
-static void buffer_release(void *data, struct wl_buffer *wlbuf) {
-    struct buffer *buf = data;
-    wl_buffer_destroy(buf->wlbuf);
-    pixman_image_unref(buf->pix);
-    munmap(buf->data, buf->size);
-    free(buf);
-}
-
-static const struct wl_buffer_listener buffer_listener = {
-    .release = buffer_release,
-};
-
-static struct buffer *buffer_create(uint32_t width, uint32_t height) {
-    assert(width > 0);
-    assert(height > 0);
-
-    uint32_t stride = width * 4;
-    uint32_t size = stride * height;
-
-    int fd = allocate_shm_file(stride * height);
-    assert(fd != -1);
-
-    void *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    assert(data != MAP_FAILED);
-
-    struct buffer *buf = malloc(sizeof(*buf));
-    buf->width = width;
-    buf->height = height;
-    buf->size = size;
-    buf->data = data;
-    buf->pix = pixman_image_create_bits_no_clear(PIXMAN_a8r8g8b8, width, height, data, stride);
-
-    struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
-    buf->wlbuf = wl_shm_pool_create_buffer(pool, 0, width, height, stride, WL_SHM_FORMAT_ARGB8888);
-    wl_buffer_add_listener(buf->wlbuf, &buffer_listener, buf);
-
-    wl_shm_pool_destroy(pool);
-    close(fd);
-
-    return buf;
+static long now_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
 }
 
 static inline pixman_color_t rgba_to_pixman(uint32_t c) {
@@ -202,23 +166,96 @@ err:
     return (size_t)-1;
 }
 
+static void draw_text_run(pixman_image_t *target, struct fcft_text_run *text_run,
+                          const pixman_color_t *fg_color, const pixman_color_t *bg_color, int32_t x,
+                          int32_t y, int32_t buffer_height) {
+    pixman_image_t *fg_pix = pixman_image_create_solid_fill(fg_color);
+    pixman_image_t *bg_pix = pixman_image_create_solid_fill(bg_color);
+
+    for (size_t i = 0; i < text_run->count; ++i) {
+        const struct fcft_glyph *g = text_run->glyphs[i];
+
+        pixman_image_fill_rectangles(PIXMAN_OP_SRC, target, bg_color, 1,
+                                     &(pixman_rectangle16_t){x, 0, g->advance.x, buffer_height});
+        if (g->is_color_glyph) {
+            pixman_image_composite32(PIXMAN_OP_OVER, g->pix, NULL, target, 0, 0, 0, 0, x + g->x,
+                                     y - g->y, g->width, g->height);
+        } else {
+            pixman_image_composite32(PIXMAN_OP_OVER, fg_pix, g->pix, target, 0, 0, 0, 0, x + g->x,
+                                     y - g->y, g->width, g->height);
+        }
+
+        x += g->advance.x;
+    }
+
+    pixman_image_unref(fg_pix);
+    pixman_image_unref(bg_pix);
+}
+
+static void buffer_release(void *data, struct wl_buffer *wlbuf) {
+    (void)wlbuf;
+
+    struct buffer *buf = data;
+    wl_buffer_destroy(buf->wlbuf);
+    buf->wlbuf = NULL;
+    pixman_image_unref(buf->pix);
+    buf->pix = NULL;
+    munmap(buf->data, buf->size);
+    buf->data = NULL;
+}
+
+static const struct wl_buffer_listener buffer_listener = {
+    .release = buffer_release,
+};
+
+static struct buffer *buffer_create(uint32_t width, uint32_t height) {
+    assert(width > 0);
+    assert(height > 0);
+
+    uint32_t stride = width * 4;
+    uint32_t size = stride * height;
+
+    int fd = allocate_shm_file(stride * height);
+    assert(fd != -1);
+
+    void *data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    assert(data != MAP_FAILED);
+
+    struct buffer *buf = malloc(sizeof(*buf));
+    buf->width = width;
+    buf->height = height;
+    buf->size = size;
+    buf->data = data;
+    buf->pix = pixman_image_create_bits_no_clear(PIXMAN_a8r8g8b8, width, height, data, stride);
+
+    struct wl_shm_pool *pool = wl_shm_create_pool(shm, fd, size);
+    buf->wlbuf = wl_shm_pool_create_buffer(pool, 0, width, height, stride, WL_SHM_FORMAT_ARGB8888);
+    wl_buffer_add_listener(buf->wlbuf, &buffer_listener, buf);
+
+    wl_shm_pool_destroy(pool);
+    close(fd);
+
+    return buf;
+}
+
 static void draw_bar(struct monitor *mon) {
     struct buffer *buffer =
         buffer_create(mon->surface_width * mon->scale, mon->surface_height * mon->scale);
 
     const pixman_color_t fg_color = rgba_to_pixman(fg);
-    pixman_image_t *fg_pix = pixman_image_create_solid_fill(&fg_color);
     const pixman_color_t bg_color = rgba_to_pixman(bg);
 
     pixman_image_fill_rectangles(PIXMAN_OP_SRC, buffer->pix, &bg_color, 1,
                                  &(pixman_rectangle16_t){0, 0, buffer->width, buffer->height});
 
-    char *rest = input;
+    char input_cpy[sizeof(input)];
+    strcpy(input_cpy, input);
+    char *p = input_cpy;
     char *text;
     int i = 0;
-    while ((text = strsep(&rest, "^")) != NULL) {
+    while ((text = strsep(&p, "^")) != NULL) {
         size_t wlen = mbsntoc32(NULL, text, strlen(text), 0);
-        if (wlen == -1) {
+        if (wlen == (size_t)-1) {
             die("mbsntoc32():");
         }
         char32_t *text32 = malloc((wlen + 1) * sizeof(*text32));
@@ -226,10 +263,10 @@ static void draw_bar(struct monitor *mon) {
         text32[wlen] = 0;
 
         struct fcft_text_run *text_run =
-            fcft_rasterize_text_run_utf32(mon->font, wlen, text32, FCFT_SUBPIXEL_NONE);
+            fcft_rasterize_text_run_utf32(mon->font, wlen, text32, FCFT_SUBPIXEL_DEFAULT);
 
         int32_t text_width = 0;
-        for (int i = 0; i < text_run->count; ++i) {
+        for (size_t i = 0; i < text_run->count; ++i) {
             text_width += text_run->glyphs[i]->advance.x;
         }
 
@@ -247,27 +284,15 @@ static void draw_bar(struct monitor *mon) {
         y += (mon->font->ascent + mon->font->descent) / 2.0 -
              (mon->font->descent > 0 ? mon->font->descent : 0);
 
-        for (int i = 0; i < text_run->count; ++i) {
-            const struct fcft_glyph *g = text_run->glyphs[i];
+        draw_text_run(buffer->pix, text_run, &fg_color, &bg_color, x, y, buffer->height);
 
-            if (g->is_color_glyph) {
-                pixman_image_composite32(PIXMAN_OP_OVER, g->pix, NULL, buffer->pix, 0, 0, 0, 0,
-                                         x + g->x, y - g->y, g->width, g->height);
-            } else {
-                pixman_image_composite32(PIXMAN_OP_OVER, fg_pix, g->pix, buffer->pix, 0, 0, 0, 0,
-                                         x + g->x, y - g->y, g->width, g->height);
-            }
-
-            x += g->advance.x;
-        }
         free(text32);
         fcft_text_run_destroy(text_run);
         i++;
     }
-    pixman_image_unref(fg_pix);
 
-    wl_surface_set_buffer_scale(mon->surface, mon->scale);
     wl_surface_attach(mon->surface, buffer->wlbuf, 0, 0);
+    wl_surface_set_buffer_scale(mon->surface, mon->scale);
     wl_surface_damage_buffer(mon->surface, 0, 0, buffer->width, buffer->height);
     wl_surface_commit(mon->surface);
 }
@@ -284,11 +309,12 @@ static void layer_surface_configure(void *data, struct zwlr_layer_surface_v1 *su
     mon->surface_height = h;
     zwlr_layer_surface_v1_ack_configure(surface, serial);
 
-    printf("%s layer surface %dx%d\n", mon->name, w, h);
+    fprintf(stderr, "%s layer surface %dx%d\n", mon->name, w, h);
 }
 
 static void layer_surface_closed(void *data, struct zwlr_layer_surface_v1 *surface) {
-    printf("layer surface closed");
+    struct monitor *mon = data;
+    fprintf(stderr, "%s layer surface closed", mon->name);
     zwlr_layer_surface_v1_destroy(surface);
 }
 
@@ -298,20 +324,20 @@ struct zwlr_layer_surface_v1_listener layer_surface_listener = {
 };
 
 static void output_scale(void *data, struct wl_output *wl_output, int32_t scale) {
+    (void)wl_output;
+
     struct monitor *mon = data;
     mon->scale = scale;
-    printf("%s scale %d\n", mon->name, mon->scale);
+    fprintf(stderr, "%s scale %d\n", mon->name, mon->scale);
 
     fcft_destroy(mon->font);
     char attrs[32];
-    snprintf(attrs, sizeof(attrs), "dpi=%d", 96 * scale);
+    snprintf(attrs, sizeof(attrs), "dpi=96:scale=%2d", scale);
     mon->font = fcft_from_name(1, (const char *[]){font}, attrs);
-    assert(mon->font);
-    printf("%s font %s\n", mon->name, mon->font->name);
+    fprintf(stderr, "%s font %s\n", mon->name, mon->font->name);
 
     if (!mon->surface) {
         int height = lineheight * mon->font->height / scale;
-
         mon->surface = wl_compositor_create_surface(compositor);
         mon->layer_surface = zwlr_layer_shell_v1_get_layer_surface(
             layer_shell, mon->surface, mon->output, ZWLR_LAYER_SHELL_V1_LAYER_TOP, "wb");
@@ -323,18 +349,21 @@ static void output_scale(void *data, struct wl_output *wl_output, int32_t scale)
                 ZWLR_LAYER_SURFACE_V1_ANCHOR_LEFT | ZWLR_LAYER_SURFACE_V1_ANCHOR_RIGHT);
         zwlr_layer_surface_v1_set_margin(mon->layer_surface, 0, 0, 0, 0);
         zwlr_layer_surface_v1_add_listener(mon->layer_surface, &layer_surface_listener, mon);
-
         wl_surface_commit(mon->surface);
+        wl_display_roundtrip(display);
     } else {
         draw_bar(mon);
     }
 }
 
 static void output_name(void *data, struct wl_output *wl_output, const char *name) {
+    (void)data;
+    (void)wl_output;
+
     struct monitor *mon = data;
     free(mon->name);
     mon->name = strdup(name);
-    printf("%s name\n", mon->name);
+    fprintf(stderr, "%s name\n", mon->name);
 }
 
 static const struct wl_output_listener output_listener = {
@@ -348,6 +377,9 @@ static const struct wl_output_listener output_listener = {
 
 static void registry_global(void *data, struct wl_registry *wl_registry, uint32_t name,
                             const char *interface, uint32_t version) {
+    (void)data;
+    (void)version;
+
     if (strcmp(interface, wl_shm_interface.name) == 0) {
         shm = wl_registry_bind(wl_registry, name, &wl_shm_interface, 1);
     } else if (strcmp(interface, wl_compositor_interface.name) == 0) {
@@ -384,12 +416,6 @@ void setup() {
     // roundtrip so listeners added during the registry events are handled
     // primarily output events so that we can create surfaces prior to rendering
     wl_display_roundtrip(display);
-
-    // and again to register the surface commit
-    wl_display_roundtrip(display);
-
-    // initial render
-    draw();
 }
 
 void run() {
@@ -399,20 +425,36 @@ void run() {
         [POLL_STDIN] = {.fd = STDIN_FILENO, .events = POLLIN},
     };
 
+    long stdin_closed_at_ms = 0;
     while (true) {
         wl_display_flush(display);
 
-        if (poll(fds, 2, -1) < 0) {
+        // adjust the timeout based on the persist flag
+        long timeout_ms = -1;
+        if (stdin_closed_at_ms > 0) {
+            if (persist_secs == -1) {
+                timeout_ms = 0;
+            } else if (persist_secs > 0) {
+                long persist_until = stdin_closed_at_ms + persist_secs * 1000;
+                timeout_ms = persist_until - now_ms();
+                if (timeout_ms < 0) {
+                    timeout_ms = 0;
+                }
+            }
+        }
+        int ret = poll(fds, 2, timeout_ms);
+        if (ret == -1) {
             die("poll:");
+        } else if (ret == 0) {
+            break;
         }
 
-        // wayland events
         if (fds[POLL_WL].revents & POLLIN) {
-            if (wl_display_dispatch(display) == -1)
+            if (wl_display_dispatch(display) == -1) {
                 break;
+            }
         }
 
-        // stdin events
         if (fds[POLL_STDIN].revents & POLLIN) {
             if (!fgets(input, sizeof(input), stdin)) {
                 die("error while reading input");
@@ -422,6 +464,7 @@ void run() {
         }
         if (fds[POLL_STDIN].revents & POLLHUP) {
             fds[POLL_STDIN].fd = -1;
+            stdin_closed_at_ms = now_ms();
         }
     }
 }
@@ -429,11 +472,11 @@ void run() {
 void cleanup() {
     struct monitor *mon, *tmp;
     wl_list_for_each_safe(mon, tmp, &monitors, link) {
-        wl_list_remove(&mon->link);
         fcft_destroy(mon->font);
         wl_output_release(mon->output);
         wl_surface_destroy(mon->surface);
         zwlr_layer_surface_v1_destroy(mon->layer_surface);
+        wl_list_remove(&mon->link);
         free(mon->name);
         free(mon);
     }
@@ -445,7 +488,6 @@ void cleanup() {
     wl_display_disconnect(display);
 
     fcft_fini();
-    free(font);
 }
 
 void usage(const char *prog_name) {
@@ -454,6 +496,7 @@ void usage(const char *prog_name) {
     "Usage: %s [OPTION]...\n"
     "Options:\n"
     "  -b       anchor bar to bottom of display\n"
+    "  -p SECS  persist for seconds after stdin is closed (0 for indefinitely)\n"
     "  -f FONT  set font description (monospace:size=10)\n"
     "  -l FONT  set line height (1.0)\n"
     "  -F HEX   set foreground color in RGBA (0xbbbbbbff)\n"
@@ -469,7 +512,7 @@ int main(int argc, char *argv[]) {
     setlocale(LC_CTYPE, "");
 
     int opt;
-    while ((opt = getopt(argc, argv, "f:l:F:B:bvh")) != -1) {
+    while ((opt = getopt(argc, argv, "f:l:p:F:B:bvh")) != -1) {
         switch (opt) {
         case 'f':
             font = strdup(optarg);
@@ -485,6 +528,9 @@ int main(int argc, char *argv[]) {
             break;
         case 'B':
             bg = strtoul(optarg, NULL, 16);
+            break;
+        case 'p':
+            persist_secs = atoi(optarg);
             break;
         case 'v':
             puts("wayland-bar " VERSION);
