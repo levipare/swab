@@ -166,32 +166,6 @@ err:
     return (size_t)-1;
 }
 
-static void draw_text_run(pixman_image_t *target, struct fcft_text_run *text_run,
-                          const pixman_color_t *fg_color, const pixman_color_t *bg_color, int32_t x,
-                          int32_t y, int32_t buffer_height) {
-    pixman_image_t *fg_pix = pixman_image_create_solid_fill(fg_color);
-    pixman_image_t *bg_pix = pixman_image_create_solid_fill(bg_color);
-
-    for (size_t i = 0; i < text_run->count; ++i) {
-        const struct fcft_glyph *g = text_run->glyphs[i];
-
-        pixman_image_fill_rectangles(PIXMAN_OP_SRC, target, bg_color, 1,
-                                     &(pixman_rectangle16_t){x, 0, g->advance.x, buffer_height});
-        if (g->is_color_glyph) {
-            pixman_image_composite32(PIXMAN_OP_OVER, g->pix, NULL, target, 0, 0, 0, 0, x + g->x,
-                                     y - g->y, g->width, g->height);
-        } else {
-            pixman_image_composite32(PIXMAN_OP_OVER, fg_pix, g->pix, target, 0, 0, 0, 0, x + g->x,
-                                     y - g->y, g->width, g->height);
-        }
-
-        x += g->advance.x;
-    }
-
-    pixman_image_unref(fg_pix);
-    pixman_image_unref(bg_pix);
-}
-
 static void buffer_release(void *data, struct wl_buffer *wlbuf) {
     (void)wlbuf;
 
@@ -236,6 +210,32 @@ static struct buffer *buffer_create(uint32_t width, uint32_t height) {
     close(fd);
 
     return buf;
+}
+
+static void draw_text_run(pixman_image_t *target, struct fcft_text_run *text_run,
+                          const pixman_color_t *fg_color, const pixman_color_t *bg_color, int32_t x,
+                          int32_t y, int32_t buffer_height) {
+    pixman_image_t *fg_pix = pixman_image_create_solid_fill(fg_color);
+    pixman_image_t *bg_pix = pixman_image_create_solid_fill(bg_color);
+
+    for (size_t i = 0; i < text_run->count; ++i) {
+        const struct fcft_glyph *g = text_run->glyphs[i];
+
+        pixman_image_fill_rectangles(PIXMAN_OP_SRC, target, bg_color, 1,
+                                     &(pixman_rectangle16_t){x, 0, g->advance.x, buffer_height});
+        if (g->is_color_glyph) {
+            pixman_image_composite32(PIXMAN_OP_OVER, g->pix, NULL, target, 0, 0, 0, 0, x + g->x,
+                                     y - g->y, g->width, g->height);
+        } else {
+            pixman_image_composite32(PIXMAN_OP_OVER, fg_pix, g->pix, target, 0, 0, 0, 0, x + g->x,
+                                     y - g->y, g->width, g->height);
+        }
+
+        x += g->advance.x;
+    }
+
+    pixman_image_unref(fg_pix);
+    pixman_image_unref(bg_pix);
 }
 
 static void draw_bar(struct monitor *mon) {
